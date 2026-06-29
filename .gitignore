@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# node (e2e seeder)
+node_modules/
+npm-debug.log*
+
+# logs
+*.log
+bulltui.log
+
+# os
+.DS_Store

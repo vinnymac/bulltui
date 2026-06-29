@@ -1,0 +1,9 @@
+# Local Valkey for development. `just demo` starts this and seeds it.
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: bulltui-valkey
+    ports:
+      # Host 6380 -> container 6379, to avoid clashing with another Redis on 6379.
+      - "6380:6379"
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]

@@ -1,0 +1,14 @@
+{
+  "name": "bulltui-e2e-seeder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Seeds authentic BullMQ data into a test Redis/Valkey for bulltui e2e tests",
+  "scripts": {
+    "seed": "node seed.mjs"
+  },
+  "dependencies": {
+    "bullmq": "^5.78.0",
+    "ioredis": "^5.4.1"
+  }
+}

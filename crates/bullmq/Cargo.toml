@@ -1,0 +1,23 @@
+[package]
+name = "bullmq"
+description = "A direct-to-Redis client for BullMQ queues (reads + admin operations)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+redis = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures-util = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+anyhow = { workspace = true }
+testcontainers = "0.23"

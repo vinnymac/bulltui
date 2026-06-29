@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = ["crates/bullmq", "crates/bulltui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/vinnymac/bulltui"
+authors = ["Vincent Taverna <vinnymac@gmail.com>"]
+
+[workspace.dependencies]
+bullmq = { path = "crates/bullmq" }
+
+# async runtime + redis
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "script", "streams"] }
+futures-util = "0.3"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# errors
+thiserror = "1"
+anyhow = "1"
+
+# misc
+tracing = "0.1"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
