@@ -16,7 +16,7 @@ pub mod keys;
 mod types;
 pub mod write;
 
-pub use client::{BullClient, DEFAULT_PREFIX};
+pub use client::{BullClient, ConnectOptions, DEFAULT_PREFIX};
 pub use error::{Error, Result};
 pub use events::EventReader;
 pub use keys::KeyBuilder;

@@ -1,0 +1,17 @@
+# Keep the build context tiny — only crates/ + Cargo.{toml,lock} are needed.
+target/
+**/node_modules/
+.git/
+.gitignore
+.github/
+docs/
+assets/
+e2e/
+*.gif
+*.log
+AGENTS.md
+CLAUDE.md
+.claude/
+Dockerfile
+.dockerignore
+docker-compose.yml

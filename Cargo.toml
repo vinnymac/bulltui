@@ -5,17 +5,27 @@ members = ["crates/bullmq", "crates/bulltui"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.88"
 license = "MIT"
-repository = "https://github.com/vinnymac/bulltui"
+repository = "https://tangled.sh/@vinnymac.dev/bulltui"
+homepage = "https://tangled.sh/@vinnymac.dev/bulltui"
+readme = "README.md"
+keywords = ["bullmq", "redis", "queue", "tui", "ratatui"]
+categories = ["command-line-utilities", "development-tools"]
 authors = ["Vincent Taverna <vinnymac@gmail.com>"]
 
 [workspace.dependencies]
 bullmq = { path = "crates/bullmq" }
 
 # async runtime + redis
+#
+# TLS (`rediss://`) rides on rustls, so there's no OpenSSL/system dependency and
+# the binary stays portable to scratch/distroless. `tls-rustls-webpki-roots`
+# compiles Mozilla's CA bundle into the binary (managed brokers — ElastiCache,
+# Upstash, Redis Cloud, Azure — chain to public CAs), and `tls-rustls-insecure`
+# backs the `--insecure` flag for self-signed / private-CA brokers.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
-redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "script", "streams"] }
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager", "script", "streams", "tokio-rustls-comp", "tls-rustls-webpki-roots", "tls-rustls-insecure"] }
 futures-util = "0.3"
 
 # serialization

@@ -8,14 +8,14 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, HitKind, HitRegion};
 use crate::format;
 use crate::theme;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
     draw_status(frame, rows[0], app);
-    draw_list(frame, rows[1], app);
+    draw_list(frame, rows[1], app, hits);
 }
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
@@ -50,7 +50,7 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_list(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_FOCUS))
@@ -112,4 +112,10 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(spans).style(row_style));
     }
     frame.render_widget(Paragraph::new(Text::from(lines)), inner);
+    hits.push(HitRegion {
+        kind: HitKind::Event,
+        area: inner,
+        offset: start,
+        count: n,
+    });
 }

@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Tabs};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{list_offset, App, HitKind, HitRegion};
 use crate::format;
 use crate::state::WorkersTab;
 use crate::theme;
@@ -18,12 +18,12 @@ use crate::theme;
 const ASSUMED_LOCK_MS: i64 = 30_000;
 const AT_RISK_MS: i64 = 5_000;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
     draw_tabs(frame, rows[0], app);
     match app.workers_tab {
-        WorkersTab::Busy => draw_busy(frame, rows[1], app),
-        WorkersTab::Roster => draw_roster(frame, rows[1], app),
+        WorkersTab::Busy => draw_busy(frame, rows[1], app, hits),
+        WorkersTab::Roster => draw_roster(frame, rows[1], app, hits),
     }
 }
 
@@ -65,7 +65,7 @@ fn lock_health_style(ttl_ms: i64) -> Style {
     }
 }
 
-fn draw_busy(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_busy(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let widths = [
         Constraint::Length(2),  // at-risk marker
         Constraint::Min(12),    // name
@@ -96,6 +96,7 @@ fn draw_busy(frame: &mut Frame, area: Rect, app: &App) {
             ))
             .right_aligned(),
         );
+    let inner = block.inner(area);
 
     if app.active_locks.is_empty() {
         frame.render_widget(
@@ -143,15 +144,28 @@ fn draw_busy(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .row_highlight_style(theme::selected())
         .highlight_symbol("▌");
-    let mut state = TableState::default();
-    state.select(Some(
-        app.active_selected
-            .min(app.active_locks.len().saturating_sub(1)),
-    ));
+    let sel = app
+        .active_selected
+        .min(app.active_locks.len().saturating_sub(1));
+    let rows_h = inner.height.saturating_sub(1); // header occupies inner.y
+    let offset = list_offset(sel, rows_h as usize, app.active_locks.len());
+    let mut state = TableState::default().with_offset(offset);
+    state.select(Some(sel));
     frame.render_stateful_widget(table, area, &mut state);
+    hits.push(HitRegion {
+        kind: HitKind::ActiveLock,
+        area: Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: rows_h,
+        },
+        offset,
+        count: app.active_locks.len(),
+    });
 }
 
-fn draw_roster(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_roster(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let widths = [
         Constraint::Length(20), // addr
         Constraint::Length(14), // queue
@@ -170,6 +184,7 @@ fn draw_roster(frame: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_FOCUS))
         .title(Span::styled(" Workers ", theme::header()));
+    let inner = block.inner(area);
 
     if let Some(err) = &app.workers_error {
         frame.render_widget(
@@ -214,9 +229,21 @@ fn draw_roster(frame: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .row_highlight_style(theme::selected())
         .highlight_symbol("▌");
-    let mut state = TableState::default();
-    state.select(Some(
-        app.worker_selected.min(app.workers.len().saturating_sub(1)),
-    ));
+    let sel = app.worker_selected.min(app.workers.len().saturating_sub(1));
+    let rows_h = inner.height.saturating_sub(1); // header occupies inner.y
+    let offset = list_offset(sel, rows_h as usize, app.workers.len());
+    let mut state = TableState::default().with_offset(offset);
+    state.select(Some(sel));
     frame.render_stateful_widget(table, area, &mut state);
+    hits.push(HitRegion {
+        kind: HitKind::Worker,
+        area: Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: rows_h,
+        },
+        offset,
+        count: app.workers.len(),
+    });
 }

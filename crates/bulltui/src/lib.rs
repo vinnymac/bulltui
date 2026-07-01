@@ -5,6 +5,7 @@
 //! ratatui's `TestBackend`.
 
 pub mod app;
+pub mod boot;
 pub mod cli;
 pub mod clipboard;
 pub mod events;

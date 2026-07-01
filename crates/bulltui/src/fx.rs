@@ -178,6 +178,160 @@ impl Animations {
     }
 }
 
+/// The shimmer's centre colour as HSL (degrees, %, %), chosen so that at *zero*
+/// wave amplitude [`hsl_to_rgb`] returns exactly `theme::SPLASH_DOT` — so the
+/// living wave blooms out of the settled cyan with no colour jump when the
+/// power-on fade hands over.
+const SHIMMER_CENTER: (f32, f32, f32) = (186.36, 75.12, 60.59);
+
+/// One full drift of the shimmer wave. The bloom and the steady loop share this
+/// cycle, so the wave's *pace* never changes across the hand-off either.
+const SHIMMER_CYCLE: (u32, Interpolation) = (2000, Interpolation::Linear);
+
+/// The boot splash's reveal: the `BULLTUI` dot-matrix wordmark **powers on**,
+/// its dots warming up from a dim glow to full cyan — a *foreground-only* fade
+/// (so no black backdrop is ever painted) — then the living [`shimmer`] **blooms
+/// out of** that settled cyan and drifts forever, so the sign never freezes.
+///
+/// The hand-off is seamless *by construction* — no colour or motion "pop":
+/// - the fade lands on exactly [`SHIMMER_CENTER`] (= `theme::SPLASH_DOT`);
+/// - the bloom opens at *zero* amplitude (so its first frame **is** that colour)
+///   and eases the amplitude up while already drifting at the loop's pace;
+/// - the bloom advances exactly one full turn, so its last frame matches the
+///   repeating loop's first frame in both colour *and* motion.
+///
+/// Owned and processed by [`crate::boot`] over the wordmark's own rect, so it's a
+/// standalone effect, not an `Animations` trigger.
+pub(crate) fn splash_reveal<T: Into<tachyonfx::EffectTimer>>(timer: T) -> Effect {
+    fx::sequence(&[
+        fx::fade_from_fg(theme::SPLASH_DOT_DIM, timer),
+        // Bloom: amplitude eased 0→full over the first ~20% of a cycle (~400ms
+        // — quick but soft), drifting at the loop's own pace, so the shimmer is
+        // clearly alive well before the splash hands off.
+        shimmer(SHIMMER_CYCLE, |a| smoothstep((a / 0.2).min(1.0))),
+        // Steady state: the same wave at full amplitude, looping forever.
+        fx::repeating(shimmer(SHIMMER_CYCLE, |_| 1.0)),
+    ])
+}
+
+/// The splash's living shimmer: a wave of **hue *and* brightness** that flows
+/// across the dots, so different dots glow different cool colours (cyan → green →
+/// blue → violet) at once and the whole pattern drifts sideways. `envelope` maps
+/// the timer `alpha` to the wave's amplitude (`0` = the flat [`SHIMMER_CENTER`]
+/// cyan, `1` = full swing), which lets the reveal bloom the wave in from nothing
+/// and then hold it steady. A per-cell shader over the wordmark rect — only `●`
+/// dot cells are painted, empty cells are left alone. Under [`fx::repeating`] the
+/// loop is seamless: the spatial phase advances exactly one full turn per cycle,
+/// and the pace comes from the timer `alpha` (never the wall clock), so it stays
+/// deterministic.
+fn shimmer<T, E>(timer: T, envelope: E) -> Effect
+where
+    T: Into<tachyonfx::EffectTimer>,
+    E: Fn(f32) -> f32 + Send + 'static,
+{
+    use std::f32::consts::TAU;
+    let (base_h, base_s, base_l) = SHIMMER_CENTER;
+    fx::effect_fn_buf((), timer, move |_state, ctx, buf| {
+        let area = ctx.area;
+        let t = ctx.alpha();
+        let amp = envelope(t).clamp(0.0, 1.0);
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                let Some(cell) = buf.cell_mut((x, y)) else {
+                    continue;
+                };
+                if cell.symbol() != "●" {
+                    continue;
+                }
+                // Phase = spatial gradient minus time, so the wave travels; the
+                // `t * TAU` term loops cleanly under `repeating`.
+                let col = (x - area.x) as f32;
+                let row = (y - area.y) as f32;
+                let phase = col * 0.20 + row * 0.55 - t * TAU;
+                let hue = base_h + amp * 58.0 * phase.sin();
+                // Brightness rides a *different* phase so colour and glow don't
+                // pulse in lockstep — a richer, less mechanical shimmer.
+                let light = base_l + amp * 18.0 * (phase + 1.3).sin();
+                cell.set_fg(hsl_to_rgb(hue, base_s, light));
+            }
+        }
+    })
+}
+
+/// Smoothstep (`3a²−2a³`): an eased `0→1` ramp with zero slope at both ends, so
+/// the shimmer's amplitude opens (and tops out) without a hard edge.
+fn smoothstep(a: f32) -> f32 {
+    let a = a.clamp(0.0, 1.0);
+    a * a * (3.0 - 2.0 * a)
+}
+
+/// HSL (`h` degrees, `s`/`l` percent) → an RGB [`Color`]. Used by the splash
+/// shimmer to sweep hue and lightness smoothly.
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
+    let h = h.rem_euclid(360.0) / 360.0;
+    let s = (s / 100.0).clamp(0.0, 1.0);
+    let l = (l / 100.0).clamp(0.0, 1.0);
+    if s == 0.0 {
+        let v = (l * 255.0).round() as u8;
+        return Color::Rgb(v, v, v);
+    }
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+    let channel = |t: f32| {
+        let t = t.rem_euclid(1.0);
+        let v = if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        };
+        (v * 255.0).round() as u8
+    };
+    Color::Rgb(channel(h + 1.0 / 3.0), channel(h), channel(h - 1.0 / 3.0))
+}
+
+/// A never-ending comet **orbiting** a box's border ring — the connecting
+/// spinner. Unlike [`border_draw_in`], the ring stays settled the whole way
+/// round (only the moving comet + its trailing glow are painted), and the trail
+/// wraps around the corner so the loop is seamless. Wrap in [`fx::repeating`] for
+/// a continuous orbit; [`crate::boot`] processes it over the body box.
+pub(crate) fn orbit<T: Into<tachyonfx::EffectTimer>>(timer: T) -> Effect {
+    fx::effect_fn_buf((), timer, move |_state, ctx, buf| {
+        let ring = ring_positions(ctx.area);
+        let n = ring.len();
+        if n == 0 {
+            return;
+        }
+        // Head sweeps 0→n across one timer cycle; `repeating` restarts it, so the
+        // comet laps the ring forever at a constant pace (alpha is timer-driven,
+        // never wall-clock, so tests stay deterministic).
+        let head = ctx.alpha() * n as f32;
+        for (i, (x, y)) in ring.into_iter().enumerate() {
+            // Circular distance the comet has travelled past this cell; wrapping
+            // keeps the trail continuous across the top-left seam.
+            let mut d = head - i as f32;
+            if d < 0.0 {
+                d += n as f32;
+            }
+            let color = if d < TRAIL {
+                lerp_rgb(RING, COMET, 1.0 - d / TRAIL)
+            } else {
+                Color::Rgb(RING.0, RING.1, RING.2)
+            };
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_fg(color);
+            }
+        }
+    })
+}
+
 /// A clockwise "draw-in" of a box's border ring: a bright comet travels around
 /// the perimeter (top → right → bottom → left), leaving the settled border
 /// colour behind it and darkness ahead, so the frame appears to draw itself.
@@ -313,5 +467,27 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), ring.len(), "no cell painted twice");
+    }
+
+    #[test]
+    fn shimmer_blooms_out_of_the_settled_splash_colour() {
+        // The whole point of the bloom: at zero amplitude the wave *is* the
+        // colour the power-on fade lands on, so there's no jump when the fade
+        // hands over. If someone retunes the shimmer's centre hue and forgets
+        // this, the seam comes back — so lock it exactly to `theme::SPLASH_DOT`.
+        let (h, s, l) = SHIMMER_CENTER;
+        assert_eq!(
+            hsl_to_rgb(h, s, l),
+            theme::SPLASH_DOT,
+            "zero-amplitude shimmer must equal the fade's endpoint (no colour pop)"
+        );
+    }
+
+    #[test]
+    fn smoothstep_eases_from_zero_to_one() {
+        assert_eq!(smoothstep(0.0), 0.0);
+        assert_eq!(smoothstep(1.0), 1.0);
+        assert_eq!(smoothstep(0.5), 0.5, "symmetric midpoint");
+        assert!(smoothstep(-1.0) == 0.0 && smoothstep(2.0) == 1.0, "clamped");
     }
 }

@@ -10,7 +10,16 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
-use testcontainers::{ContainerAsync, GenericImage};
+use testcontainers::{ContainerAsync, GenericImage, ImageExt};
+
+/// A disposable self-signed cert + private key for the TLS e2e broker.
+///
+/// **Not a secret.** It exists only to give the throwaway test container a TLS
+/// identity: it is served on an ephemeral `localhost` container, trusted by no
+/// real client (the test connects with verification off), and can be freely
+/// regenerated. CN `bulltui-test-redis`, valid to 2126.
+pub const TEST_TLS_CERT_PEM: &str = include_str!("redis-test.crt");
+pub const TEST_TLS_KEY_PEM: &str = include_str!("redis-test.key");
 
 /// A running Redis container plus its connection URL.
 pub struct RedisFixture {
@@ -36,6 +45,48 @@ pub async fn start_redis() -> RedisFixture {
         .await
         .expect("container port");
     let url = format!("redis://{host}:{port}");
+    RedisFixture { container, url }
+}
+
+/// Start a **TLS-only** Redis container: the plaintext port is disabled
+/// (`--port 0`) and the server listens only on a TLS port serving
+/// [`TEST_TLS_CERT_PEM`]. Returns a `rediss://` URL. Client cert auth is off
+/// (`--tls-auth-clients no`), so the CA file is only there to satisfy config.
+pub async fn start_redis_tls() -> RedisFixture {
+    // Ryuk's reaper image isn't cached and can't be pulled in this environment.
+    std::env::set_var("TESTCONTAINERS_RYUK_DISABLED", "true");
+
+    let container = GenericImage::new("redis", "7-alpine")
+        .with_exposed_port(6379.tcp())
+        .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
+        .with_copy_to("/tls/redis.crt", TEST_TLS_CERT_PEM.as_bytes().to_vec())
+        .with_copy_to("/tls/redis.key", TEST_TLS_KEY_PEM.as_bytes().to_vec())
+        // Leading `--` arg → the image entrypoint prepends `redis-server` and
+        // drops to the `redis` user; the copied files are world-readable (0644).
+        .with_cmd([
+            "--tls-port",
+            "6379",
+            "--port",
+            "0",
+            "--tls-cert-file",
+            "/tls/redis.crt",
+            "--tls-key-file",
+            "/tls/redis.key",
+            "--tls-ca-cert-file",
+            "/tls/redis.crt",
+            "--tls-auth-clients",
+            "no",
+        ])
+        .start()
+        .await
+        .expect("start redis TLS container");
+
+    let host = container.get_host().await.expect("container host");
+    let port = container
+        .get_host_port_ipv4(6379.tcp())
+        .await
+        .expect("container port");
+    let url = format!("rediss://{host}:{port}");
     RedisFixture { container, url }
 }
 

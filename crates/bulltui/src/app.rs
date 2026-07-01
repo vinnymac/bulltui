@@ -8,8 +8,12 @@ use bullmq::{
     ActiveJobLock, BullClient, FlowNode, Job, JobCounts, JobScheduler, JobState, Metrics,
     MetricsKind, QueueEvent, QueueSummary, RateLimitStatus, RedisInfo, WorkerInfo,
 };
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use futures_util::StreamExt;
+use ratatui::layout::Rect;
 use ratatui::DefaultTerminal;
 use serde_json::Value;
 
@@ -91,6 +95,87 @@ impl OverviewSort {
             OverviewSort::Failed => OverviewSort::Delayed,
             OverviewSort::Delayed => OverviewSort::Name,
         }
+    }
+}
+
+/// Which ordered collection a mouse click maps onto. The resolved index is an
+/// index into the *same* slice the keyboard and renderer use (`visible_queues`,
+/// `visible_jobs`, `flatten_flow`, …), so a click can never land on a row the
+/// keyboard couldn't reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HitKind {
+    OverviewQueue,
+    Job,
+    FlowNode,
+    Scheduler,
+    ActiveLock,
+    Worker,
+    Event,
+}
+
+/// A band of 1-row list entries the renderer drew this frame, with the scroll
+/// offset and item count needed to turn a click row back into an item index.
+/// Rebuilt every frame by the UI ([`crate::ui::draw`]) — a pure function of
+/// state + layout, so it never reads the clock or touches effects and stays
+/// deterministic under `TestBackend`.
+#[derive(Debug, Clone, Copy)]
+pub struct HitRegion {
+    pub kind: HitKind,
+    /// The data-rows rectangle (header row and borders already excluded).
+    pub area: Rect,
+    /// Index of the first visible row (the renderer's scroll offset).
+    pub offset: usize,
+    /// Total items in the list (so off-the-end clicks resolve to nothing).
+    pub count: usize,
+}
+
+/// Scroll bounds of the job-detail body captured by the last [`crate::ui::draw`]
+/// — a layout fact recorded for the next input tick, exactly like the
+/// [`HitRegion`] map (a pure function of state + layout, so it stays
+/// deterministic under `TestBackend`). `max_scroll` is the largest in-bounds
+/// `detail_scroll` (content height minus the viewport); `page` is the viewport
+/// height (a PageUp/PageDown step). Both are `0` until the first render and
+/// whenever the content already fits — so scrolling is a no-op when there's
+/// nothing to reveal, never a scroll into empty space.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DetailView {
+    pub max_scroll: u16,
+    pub page: u16,
+}
+
+/// Clamp a vertical scroll move to `[0, max]` — the bound the last render
+/// recorded — so the detail body can never be scrolled past its content into
+/// empty space. Pure, so it's unit-tested without spinning up an `App`.
+pub(crate) fn clamp_scroll(current: u16, delta: isize, max: u16) -> u16 {
+    (current as isize + delta).clamp(0, max as isize) as u16
+}
+
+impl HitRegion {
+    /// The item index at `(col, row)`, or `None` when the point is outside the
+    /// band or past the last item.
+    pub fn index_at(&self, col: u16, row: u16) -> Option<usize> {
+        let in_x = col >= self.area.x && col < self.area.x.saturating_add(self.area.width);
+        let in_y = row >= self.area.y && row < self.area.y.saturating_add(self.area.height);
+        if !in_x || !in_y {
+            return None;
+        }
+        let idx = self.offset + (row - self.area.y) as usize;
+        (idx < self.count).then_some(idx)
+    }
+}
+
+/// First visible index for a viewport `height` rows tall that keeps `selected`
+/// on screen — the single windowing rule shared by every list renderer and the
+/// mouse hit map, so a click resolves to exactly the row that's drawn.
+pub fn list_offset(selected: usize, height: usize, count: usize) -> usize {
+    if height == 0 || count == 0 {
+        return 0;
+    }
+    let sel = selected.min(count - 1);
+    if sel >= height {
+        sel + 1 - height
+    } else {
+        0
     }
 }
 
@@ -176,6 +261,9 @@ pub struct App {
     pub job_logs: Vec<String>,
     pub job_flow: Option<FlowNode>,
     pub detail_scroll: u16,
+    /// Scroll bounds of the detail body recorded by the last render; see
+    /// [`DetailView`]. Consulted by the scroll keys/wheel to clamp movement.
+    pub detail_view: DetailView,
     /// Cursor into the flattened flow tree ([`flatten_flow`]) on the Flow tab.
     /// `↑↓` move it; `Enter` jumps to the node under it. Kept in sync with the
     /// focused job whenever a job opens (see [`App::sync_flow_selection`]).
@@ -184,6 +272,18 @@ pub struct App {
     // overlays' data
     pub redis_info: Option<RedisInfo>,
     pub metrics: Option<(Metrics, Metrics)>, // (completed, failed)
+
+    // mouse navigation (on by default; strictly additive to the keyboard)
+    /// Whether the terminal is capturing mouse events. On by default (the
+    /// mainstream TUI posture); the run loop enables/disables capture to match.
+    /// When true the terminal's native click-drag selection is suspended, so the
+    /// escape hatches are `Shift`/`⌥`-drag (native selection while captured) and
+    /// `Ctrl+O` (drop capture); `y`/OSC-52 copies regardless. When false the
+    /// native selection is fully restored. Seeded from `--no-mouse`.
+    pub mouse_capture: bool,
+    /// Clickable list bands recorded by the last [`crate::ui::draw`]. Consulted
+    /// by [`App::on_mouse`] to map a click to the row the keyboard would act on.
+    pub mouse_regions: Vec<HitRegion>,
 }
 
 /// Flatten a flow tree into preorder (depth-first, children in stored order),
@@ -211,6 +311,8 @@ impl App {
             confirm_actions: !args.no_confirm,
             focus: 0,
         };
+        // Mouse capture is on by default; `--no-mouse` starts it off.
+        let mouse_on = !args.no_mouse;
         Self {
             client,
             args,
@@ -265,9 +367,12 @@ impl App {
             job_logs: Vec::new(),
             job_flow: None,
             detail_scroll: 0,
+            detail_view: DetailView::default(),
             flow_selected: 0,
             redis_info: None,
             metrics: None,
+            mouse_capture: mouse_on,
+            mouse_regions: Vec::new(),
         }
     }
 
@@ -931,6 +1036,30 @@ impl App {
         self.job_selected = next as usize;
     }
 
+    /// Clamp-move a selection cursor over a list of `len` items, mirroring
+    /// [`Self::move_overview`]. Shared by the key handlers and mouse wheel so
+    /// schedulers / busy / roster all scroll identically. Returns the new index.
+    fn clamp_move(cur: usize, delta: isize, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
+        (cur as isize + delta).clamp(0, len as isize - 1) as usize
+    }
+
+    fn move_scheduler(&mut self, delta: isize) {
+        self.scheduler_selected =
+            Self::clamp_move(self.scheduler_selected, delta, self.schedulers.len());
+    }
+
+    fn move_active(&mut self, delta: isize) {
+        self.active_selected =
+            Self::clamp_move(self.active_selected, delta, self.active_locks.len());
+    }
+
+    fn move_worker(&mut self, delta: isize) {
+        self.worker_selected = Self::clamp_move(self.worker_selected, delta, self.workers.len());
+    }
+
     /// Number of nodes in the current flow tree (0 when there's no flow).
     fn flow_len(&self) -> usize {
         self.job_flow
@@ -947,6 +1076,19 @@ impl App {
         }
         let next = (self.flow_selected as isize + delta).clamp(0, len as isize - 1);
         self.flow_selected = next as usize;
+    }
+
+    /// Move the detail-body scroll by `delta` lines, clamped to the content
+    /// bounds the last render recorded ([`DetailView::max_scroll`]) so a short
+    /// payload can't be scrolled off into empty space.
+    fn scroll_detail(&mut self, delta: isize) {
+        self.detail_scroll = clamp_scroll(self.detail_scroll, delta, self.detail_view.max_scroll);
+    }
+
+    /// A PageUp/PageDown step: a viewport-worth of lines minus one for
+    /// continuity, at least one. Derived from the height the last render recorded.
+    fn page_step(&self) -> isize {
+        (self.detail_view.page.saturating_sub(1)).max(1) as isize
     }
 
     /// Land the Flow-tab cursor on the currently-focused job within the freshly
@@ -1014,6 +1156,122 @@ impl App {
         };
         self.job_tab = tabs[next];
         self.detail_scroll = 0;
+    }
+
+    // -- mouse navigation ---------------------------------------------------
+
+    /// Flip terminal mouse capture. The run loop reconciles the real terminal to
+    /// this flag; we only flash so the change is never silent (the active mode
+    /// also shows in the header). The keyboard keeps working in either mode.
+    fn toggle_mouse_capture(&mut self) {
+        self.mouse_capture = !self.mouse_capture;
+        if self.mouse_capture {
+            self.flash("mouse capture ON — click a row to select, click again to open · Shift/⌥-drag to select text");
+        } else {
+            self.flash("mouse capture OFF — native click-drag text selection restored");
+        }
+    }
+
+    /// Route a mouse event. Additive to the keyboard: clicks select / open and
+    /// the wheel scrolls, all through the same state the keys drive. Overlays
+    /// stay keyboard-only, so mouse input is ignored while one is open. Public
+    /// so tests can inject synthetic `MouseEvent`s after a render (no terminal).
+    pub async fn on_mouse(&mut self, me: MouseEvent) {
+        if !self.overlay.is_none() {
+            return;
+        }
+        match me.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.mouse_click(me.column, me.row).await,
+            MouseEventKind::ScrollDown => self.mouse_scroll(1),
+            MouseEventKind::ScrollUp => self.mouse_scroll(-1),
+            _ => {}
+        }
+    }
+
+    /// The (kind, index) of the list row drawn under `(col, row)` last frame.
+    fn mouse_hit(&self, col: u16, row: u16) -> Option<(HitKind, usize)> {
+        self.mouse_regions
+            .iter()
+            .find_map(|r| r.index_at(col, row).map(|i| (r.kind, i)))
+    }
+
+    /// Left-click: a click on a different row moves the cursor there; a click on
+    /// the row already under the cursor activates it (open / drill in). This
+    /// two-step model needs no double-click timer, so it stays deterministic.
+    async fn mouse_click(&mut self, col: u16, row: u16) {
+        let Some((kind, idx)) = self.mouse_hit(col, row) else {
+            return;
+        };
+        match kind {
+            HitKind::OverviewQueue => {
+                if self.overview_selected == idx {
+                    if let Some(name) = self.selected_queue_name() {
+                        self.open_queue(name).await;
+                    }
+                } else {
+                    self.overview_selected = idx;
+                }
+            }
+            HitKind::Job => {
+                if self.job_selected == idx {
+                    self.open_job().await;
+                } else {
+                    self.job_selected = idx;
+                }
+            }
+            HitKind::FlowNode => {
+                if self.flow_selected == idx {
+                    self.jump_to_selected_flow_node().await;
+                } else {
+                    self.flow_selected = idx;
+                }
+            }
+            // Schedulers and the Roster have no per-row "open", so a click only
+            // selects — matching what the keyboard can do there.
+            HitKind::Scheduler => self.scheduler_selected = idx,
+            HitKind::Worker => self.worker_selected = idx,
+            HitKind::ActiveLock => {
+                if self.active_selected == idx {
+                    if let Some(lock) = self.active_locks.get(idx) {
+                        let (q, id) = (lock.queue.clone(), lock.job.id.clone());
+                        self.open_job_by_id(q, id).await;
+                    }
+                } else {
+                    self.active_selected = idx;
+                }
+            }
+            HitKind::Event => {
+                if self.events_selected == idx {
+                    self.open_event_from_selected().await;
+                } else {
+                    self.events_selected = idx;
+                    self.events_follow = idx + 1 >= self.filtered_event_count();
+                }
+            }
+        }
+    }
+
+    /// Wheel: scroll the active screen's primary list / body by moving the same
+    /// cursor (or detail scroll) the arrow keys drive.
+    fn mouse_scroll(&mut self, delta: isize) {
+        const WHEEL_LINES: u16 = 3;
+        match self.screen {
+            Screen::Overview => self.move_overview(delta),
+            Screen::Queue => self.move_job(delta),
+            Screen::Schedulers => self.move_scheduler(delta),
+            Screen::Workers => match self.workers_tab {
+                WorkersTab::Busy => self.move_active(delta),
+                WorkersTab::Roster => self.move_worker(delta),
+            },
+            Screen::Events => self.events_move(delta),
+            Screen::Job => {
+                if self.job_tab == JobTab::Flow {
+                    self.move_flow(delta);
+                } else {
+                    self.scroll_detail(delta * WHEEL_LINES as isize);
+                }
+            }
+        }
     }
 
     // -- action execution ---------------------------------------------------
@@ -1301,6 +1559,10 @@ impl App {
                 self.refresh_active().await;
                 return;
             }
+            KeyCode::Char('o') if ctrl => {
+                self.toggle_mouse_capture();
+                return;
+            }
             KeyCode::Char(':') => {
                 self.open_palette();
                 return;
@@ -1541,18 +1803,18 @@ impl App {
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 // On the Flow tab the vertical keys move the tree cursor; on
-                // every other tab they scroll the detail body.
+                // every other tab they scroll the detail body (bounded).
                 if self.job_tab == JobTab::Flow {
                     self.move_flow(1);
                 } else {
-                    self.detail_scroll = self.detail_scroll.saturating_add(1);
+                    self.scroll_detail(1);
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 if self.job_tab == JobTab::Flow {
                     self.move_flow(-1);
                 } else {
-                    self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                    self.scroll_detail(-1);
                 }
             }
             KeyCode::Char('g') | KeyCode::Home => {
@@ -1560,6 +1822,29 @@ impl App {
                     self.flow_selected = 0;
                 } else {
                     self.detail_scroll = 0;
+                }
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                if self.job_tab == JobTab::Flow {
+                    self.flow_selected = self.flow_len().saturating_sub(1);
+                } else {
+                    self.detail_scroll = self.detail_view.max_scroll;
+                }
+            }
+            KeyCode::PageDown => {
+                let step = self.page_step();
+                if self.job_tab == JobTab::Flow {
+                    self.move_flow(step);
+                } else {
+                    self.scroll_detail(step);
+                }
+            }
+            KeyCode::PageUp => {
+                let step = self.page_step();
+                if self.job_tab == JobTab::Flow {
+                    self.move_flow(-step);
+                } else {
+                    self.scroll_detail(-step);
                 }
             }
             // Enter drills into the selected flow node (Flow tab only). `→`/`l`
@@ -1577,15 +1862,8 @@ impl App {
     async fn schedulers_key(&mut self, key: KeyEvent) {
         let q = self.queue_name.clone();
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                let len = self.schedulers.len();
-                if len > 0 {
-                    self.scheduler_selected = (self.scheduler_selected + 1).min(len - 1);
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.scheduler_selected = self.scheduler_selected.saturating_sub(1)
-            }
+            KeyCode::Char('j') | KeyCode::Down => self.move_scheduler(1),
+            KeyCode::Char('k') | KeyCode::Up => self.move_scheduler(-1),
             KeyCode::Char('g') | KeyCode::Home => self.scheduler_selected = 0,
             KeyCode::Char('G') | KeyCode::End => {
                 self.scheduler_selected = self.schedulers.len().saturating_sub(1)
@@ -1624,22 +1902,12 @@ impl App {
                 self.animations.tab_switch();
             }
             KeyCode::Char('j') | KeyCode::Down => match self.workers_tab {
-                WorkersTab::Busy => {
-                    let n = self.active_locks.len();
-                    if n > 0 {
-                        self.active_selected = (self.active_selected + 1).min(n - 1);
-                    }
-                }
-                WorkersTab::Roster => {
-                    let n = self.workers.len();
-                    if n > 0 {
-                        self.worker_selected = (self.worker_selected + 1).min(n - 1);
-                    }
-                }
+                WorkersTab::Busy => self.move_active(1),
+                WorkersTab::Roster => self.move_worker(1),
             },
             KeyCode::Char('k') | KeyCode::Up => match self.workers_tab {
-                WorkersTab::Busy => self.active_selected = self.active_selected.saturating_sub(1),
-                WorkersTab::Roster => self.worker_selected = self.worker_selected.saturating_sub(1),
+                WorkersTab::Busy => self.move_active(-1),
+                WorkersTab::Roster => self.move_worker(-1),
             },
             KeyCode::Char('r') => self.reload_workers().await,
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
@@ -2393,6 +2661,14 @@ pub async fn run(terminal: &mut DefaultTerminal, client: BullClient, args: Args)
     let mut tick = tokio::time::interval(Duration::from_secs(tick_secs(current_poll)));
     tick.tick().await; // consume immediate tick
 
+    // Reconcile the terminal's mouse capture to `app.mouse_capture`. On by
+    // default (mainstream TUI posture); `--no-mouse` / `Ctrl+O` flip it, and
+    // Shift/⌥-drag selects text natively while captured. Tracked separately so we
+    // only issue the escape sequence on an actual change.
+    let mut mouse_on = false;
+    let want_mouse = app.mouse_capture;
+    set_mouse_capture(&mut app, &mut mouse_on, want_mouse);
+
     let mut last_frame = Instant::now();
     loop {
         // Time since the previous frame drives the animations forward.
@@ -2416,8 +2692,10 @@ pub async fn run(terminal: &mut DefaultTerminal, client: BullClient, args: Args)
         let budget = app.animations.frame_budget(app.connected);
         tokio::select! {
             maybe_event = events.next() => {
-                if let Some(Ok(Event::Key(key))) = maybe_event {
-                    app.on_key(key).await;
+                match maybe_event {
+                    Some(Ok(Event::Key(key))) => app.on_key(key).await,
+                    Some(Ok(Event::Mouse(me))) => app.on_mouse(me).await,
+                    _ => {}
                 }
             }
             _ = tick.tick() => {
@@ -2441,6 +2719,12 @@ pub async fn run(terminal: &mut DefaultTerminal, client: BullClient, args: Args)
             current_poll = app.settings.poll_secs;
             tick = tokio::time::interval(Duration::from_secs(tick_secs(current_poll)));
             tick.tick().await;
+        }
+
+        // Reconcile mouse capture if it was toggled this frame (Ctrl+O).
+        if app.mouse_capture != mouse_on {
+            let want = app.mouse_capture;
+            set_mouse_capture(&mut app, &mut mouse_on, want);
         }
 
         // Manage the lazy events-stream task lifecycle.
@@ -2470,6 +2754,9 @@ pub async fn run(terminal: &mut DefaultTerminal, client: BullClient, args: Args)
         }
 
         if app.should_quit {
+            if mouse_on {
+                set_mouse_capture(&mut app, &mut mouse_on, false);
+            }
             if let Some(h) = ev_handle.take() {
                 h.shutdown().await;
             }
@@ -2477,6 +2764,25 @@ pub async fn run(terminal: &mut DefaultTerminal, client: BullClient, args: Args)
         }
     }
     Ok(())
+}
+
+/// Enable or disable terminal mouse capture, syncing `tracked` to `want`. A
+/// failed escape sequence is surfaced in the status line (never swallowed) and
+/// `tracked` is left untouched so we don't claim a mode the terminal rejected.
+fn set_mouse_capture(app: &mut App, tracked: &mut bool, want: bool) {
+    if *tracked == want {
+        return;
+    }
+    let mut out = std::io::stdout();
+    let res = if want {
+        crossterm::execute!(out, EnableMouseCapture)
+    } else {
+        crossterm::execute!(out, DisableMouseCapture)
+    };
+    match res {
+        Ok(()) => *tracked = want,
+        Err(e) => app.set_error(format!("mouse capture: {e}")),
+    }
 }
 
 /// Resolve to the next animation frame after `budget`, or never when `None`
@@ -2556,5 +2862,60 @@ mod tests {
     fn flatten_flow_single_node_is_one_row() {
         let tree = node("solo", "q", vec![]);
         assert_eq!(flatten_flow(&tree).len(), 1);
+    }
+
+    #[test]
+    fn list_offset_windows_to_keep_selection_visible() {
+        // Everything fits: no scroll regardless of selection.
+        assert_eq!(list_offset(0, 5, 3), 0);
+        assert_eq!(list_offset(2, 5, 3), 0);
+        // Selection past the bottom edge scrolls just enough to pin it last.
+        assert_eq!(list_offset(4, 5, 10), 0, "last visible row needs no scroll");
+        assert_eq!(list_offset(5, 5, 10), 1, "the 6th row scrolls one line");
+        assert_eq!(list_offset(9, 5, 10), 5);
+        // Degenerate inputs never panic or scroll.
+        assert_eq!(list_offset(3, 0, 10), 0);
+        assert_eq!(list_offset(3, 5, 0), 0);
+    }
+
+    #[test]
+    fn clamp_scroll_never_runs_past_the_content() {
+        // Within bounds: moves by delta.
+        assert_eq!(clamp_scroll(0, 1, 10), 1);
+        assert_eq!(clamp_scroll(5, 3, 10), 8);
+        // Clamps at the bottom — a page past the end lands exactly on max.
+        assert_eq!(clamp_scroll(9, 50, 10), 10, "can't scroll into the void");
+        assert_eq!(clamp_scroll(10, 1, 10), 10, "already at the bottom");
+        // Clamps at the top — no negative offset.
+        assert_eq!(clamp_scroll(2, -50, 10), 0);
+        assert_eq!(clamp_scroll(0, -1, 10), 0);
+        // A zero max (content fits) pins to the top: scrolling is a no-op.
+        assert_eq!(clamp_scroll(0, 5, 0), 0);
+    }
+
+    #[test]
+    fn hit_region_maps_click_row_to_offset_index() {
+        let region = HitRegion {
+            kind: HitKind::Job,
+            area: Rect {
+                x: 2,
+                y: 4,
+                width: 10,
+                height: 3,
+            },
+            offset: 5,
+            count: 9,
+        };
+        // Within the band: index = offset + (row - area.y).
+        assert_eq!(region.index_at(5, 4), Some(5), "first visible row → offset");
+        assert_eq!(region.index_at(5, 6), Some(7));
+        // Outside the columns or rows: no hit.
+        assert_eq!(region.index_at(1, 4), None, "left of the band");
+        assert_eq!(region.index_at(12, 4), None, "right of the band");
+        assert_eq!(region.index_at(5, 3), None, "above the band");
+        assert_eq!(region.index_at(5, 7), None, "below the band");
+        // A row inside the band but past the last item resolves to nothing.
+        let short = HitRegion { count: 6, ..region };
+        assert_eq!(short.index_at(5, 6), None, "offset 5 + row 2 = 7 ≥ count 6");
     }
 }

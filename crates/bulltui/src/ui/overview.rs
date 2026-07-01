@@ -12,10 +12,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
-use crate::app::{App, OverviewView};
+use crate::app::{list_offset, App, HitKind, HitRegion, OverviewView};
 use crate::theme;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let queues = app.visible_queues();
 
     let mut title = format!(" Queues ({}) ", queues.len());
@@ -53,8 +53,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(block, area);
 
     match app.overview_view {
-        OverviewView::Table => draw_table(frame, inner, &queues, app),
-        OverviewView::Bars => draw_bars(frame, inner, &queues, app),
+        OverviewView::Table => draw_table(frame, inner, &queues, app, hits),
+        OverviewView::Bars => draw_bars(frame, inner, &queues, app, hits),
     }
 }
 
@@ -68,7 +68,13 @@ fn count_cell(state: JobState, n: i64) -> Cell<'static> {
     }
 }
 
-fn draw_table(frame: &mut Frame, area: Rect, queues: &[&QueueSummary], app: &App) {
+fn draw_table(
+    frame: &mut Frame,
+    area: Rect,
+    queues: &[&QueueSummary],
+    app: &App,
+    hits: &mut Vec<HitRegion>,
+) {
     // Full, readable headers (no cryptic abbreviations); widths are sized to
     // the header words since the counts themselves are short.
     let header = Row::new(vec![
@@ -135,9 +141,25 @@ fn draw_table(frame: &mut Frame, area: Rect, queues: &[&QueueSummary], app: &App
         .row_highlight_style(theme::selected())
         .highlight_symbol("▌");
 
-    let mut state = TableState::default();
-    state.select(Some(app.overview_selected.min(queues.len() - 1)));
+    // Data rows sit one row below the header; window them so the cursor stays
+    // visible, and record that geometry for click hit-testing.
+    let sel = app.overview_selected.min(queues.len() - 1);
+    let rows_h = area.height.saturating_sub(1);
+    let offset = list_offset(sel, rows_h as usize, queues.len());
+    let mut state = TableState::default().with_offset(offset);
+    state.select(Some(sel));
     frame.render_stateful_widget(table, area, &mut state);
+    hits.push(HitRegion {
+        kind: HitKind::OverviewQueue,
+        area: Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: rows_h,
+        },
+        offset,
+        count: queues.len(),
+    });
 }
 
 // -- bar view --------------------------------------------------------------
@@ -145,7 +167,13 @@ fn draw_table(frame: &mut Frame, area: Rect, queues: &[&QueueSummary], app: &App
 const NAME_W: u16 = 22;
 const TOTAL_W: u16 = 7;
 
-fn draw_bars(frame: &mut Frame, area: Rect, queues: &[&QueueSummary], app: &App) {
+fn draw_bars(
+    frame: &mut Frame,
+    area: Rect,
+    queues: &[&QueueSummary],
+    app: &App,
+    hits: &mut Vec<HitRegion>,
+) {
     // Legend (2 rows, wrapping) + the list of queue bars.
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).split(area);
     draw_legend(frame, rows[0]);
@@ -158,7 +186,7 @@ fn draw_bars(frame: &mut Frame, area: Rect, queues: &[&QueueSummary], app: &App)
     let total = queues.len();
     let sel = app.overview_selected.min(total.saturating_sub(1));
     // Window the list so the selected row stays visible.
-    let offset = if sel >= rows_h { sel + 1 - rows_h } else { 0 };
+    let offset = list_offset(sel, rows_h, total);
     let end = (offset + rows_h).min(total);
 
     for (slot, idx) in (offset..end).enumerate() {
@@ -171,6 +199,12 @@ fn draw_bars(frame: &mut Frame, area: Rect, queues: &[&QueueSummary], app: &App)
         };
         draw_bar_row(frame, row_rect, q, idx == sel);
     }
+    hits.push(HitRegion {
+        kind: HitKind::OverviewQueue,
+        area: list,
+        offset,
+        count: total,
+    });
 }
 
 fn draw_legend(frame: &mut Frame, area: Rect) {

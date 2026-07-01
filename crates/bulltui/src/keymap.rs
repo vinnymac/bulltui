@@ -114,6 +114,11 @@ pub const BINDINGS: &[Binding] = &[
         keys: "E",
         desc: "live events feed",
     },
+    Binding {
+        group: Group::Global,
+        keys: "Ctrl+O",
+        desc: "toggle mouse capture (on by default; Shift/⌥-drag selects text, off restores native selection)",
+    },
     // Overview
     Binding {
         group: Group::Overview,
@@ -246,6 +251,16 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Job,
         keys: "↑↓",
         desc: "scroll detail · move flow node (Flow tab)",
+    },
+    Binding {
+        group: Group::Job,
+        keys: "PgUp/PgDn",
+        desc: "page the detail body / flow cursor",
+    },
+    Binding {
+        group: Group::Job,
+        keys: "g / G",
+        desc: "jump to top / bottom (Home/End)",
     },
     Binding {
         group: Group::Job,
@@ -491,6 +506,11 @@ const JOB_STATUS: &[Hint] = &[
         binding: "↑↓",
     },
     Hint {
+        keys: "⇟",
+        label: "page",
+        binding: "PgUp/PgDn",
+    },
+    Hint {
         keys: "⏎",
         label: "open node",
         binding: "Enter",
@@ -549,6 +569,11 @@ const SCHEDULERS_STATUS: &[Hint] = &[
         binding: "r",
     },
     Hint {
+        keys: "w",
+        label: "busy",
+        binding: "w",
+    },
+    Hint {
         keys: ":",
         label: "cmd",
         binding: ":",
@@ -585,6 +610,11 @@ const WORKERS_STATUS: &[Hint] = &[
         keys: "r",
         label: "refresh",
         binding: "r",
+    },
+    Hint {
+        keys: "E",
+        label: "events",
+        binding: "E",
     },
     Hint {
         keys: ":",
@@ -633,6 +663,11 @@ const EVENTS_STATUS: &[Hint] = &[
         keys: "n",
         label: "fail",
         binding: "n / N",
+    },
+    Hint {
+        keys: "⏎",
+        label: "open",
+        binding: "Enter / →",
     },
     Hint {
         keys: "esc",
@@ -716,5 +751,31 @@ mod tests {
         for g in GROUP_ORDER {
             assert!(bindings_in(g).next().is_some(), "no bindings in {g:?}");
         }
+    }
+
+    /// The operator screens (Schedulers / Workers / Events) advertise their
+    /// high-value-but-easy-to-miss actions on screen: Events its drill-in to the
+    /// job behind an event, and Schedulers/Workers the global jump along the
+    /// "scheduled → running now → just happened" operator chain. Guards against a
+    /// future edit silently dropping these from the status line.
+    #[test]
+    fn operator_screens_surface_their_key_shortcuts() {
+        let surfaces = |screen: Screen, binding: &str| {
+            status_hints(screen).iter().any(|h| h.binding == binding)
+        };
+        // Events: the event's job is openable — say so.
+        assert!(
+            surfaces(Screen::Events, "Enter / →"),
+            "Events status line must advertise opening the event's job"
+        );
+        // Schedulers → busy workers; Workers → live events feed.
+        assert!(
+            surfaces(Screen::Schedulers, "w"),
+            "Schedulers status line must advertise the jump to busy workers"
+        );
+        assert!(
+            surfaces(Screen::Workers, "E"),
+            "Workers status line must advertise the jump to the events feed"
+        );
     }
 }

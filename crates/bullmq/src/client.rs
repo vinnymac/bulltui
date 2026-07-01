@@ -6,9 +6,13 @@
 //! which RPOPs a stale marker — we instead account for the marker in-place).
 
 use std::collections::{BTreeSet, HashMap};
+use std::time::Duration;
 
-use redis::aio::ConnectionManager;
-use redis::{from_redis_value, AsyncCommands, Value as RedisValue};
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
+use redis::{
+    from_redis_value, AsyncCommands, ConnectionAddr, ConnectionInfo, IntoConnectionInfo,
+    Value as RedisValue,
+};
 
 use crate::error::{Error, Result};
 use crate::keys::KeyBuilder;
@@ -20,6 +24,24 @@ use crate::types::{
 /// The default key prefix BullMQ uses.
 pub const DEFAULT_PREFIX: &str = "bull";
 
+/// Options controlling how [`BullClient::connect_with`] establishes the
+/// connection.
+///
+/// TLS is selected by the URL *scheme*: a `rediss://` URL connects over TLS
+/// (verifying the server against the compiled-in Mozilla CA roots), a
+/// `redis://` URL is plaintext. These options tune that handshake.
+#[derive(Debug, Clone, Default)]
+pub struct ConnectOptions {
+    /// Skip TLS certificate verification. Only valid with a `rediss://` URL;
+    /// pairing it with a plaintext `redis://` URL is a hard error rather than a
+    /// silent no-op.
+    ///
+    /// This is **insecure**: it disables authentication of the server, so the
+    /// connection is exposed to man-in-the-middle attacks. It exists for
+    /// self-signed / private-CA brokers on a trusted network.
+    pub insecure: bool,
+}
+
 /// A connection to a Redis/Valkey server hosting BullMQ queues.
 #[derive(Clone)]
 pub struct BullClient {
@@ -30,9 +52,24 @@ pub struct BullClient {
 
 impl BullClient {
     /// Connect to Redis at `url` using `prefix` (default [`DEFAULT_PREFIX`]).
+    ///
+    /// A `rediss://` URL connects over TLS with certificate verification. For
+    /// TLS knobs (e.g. skipping verification), use [`BullClient::connect_with`].
     pub async fn connect(url: &str, prefix: impl Into<String>) -> Result<Self> {
-        let client = redis::Client::open(url)?;
-        let conn = client.get_connection_manager().await?;
+        Self::connect_with(url, prefix, ConnectOptions::default()).await
+    }
+
+    /// Connect to Redis at `url` using `prefix` and explicit [`ConnectOptions`].
+    pub async fn connect_with(
+        url: &str,
+        prefix: impl Into<String>,
+        opts: ConnectOptions,
+    ) -> Result<Self> {
+        let info = connection_info(url, &opts)?;
+        let client = redis::Client::open(info)?;
+        let conn = client
+            .get_connection_manager_with_config(connection_manager_config())
+            .await?;
         Ok(Self {
             client,
             conn,
@@ -705,6 +742,45 @@ impl BullClient {
     }
 }
 
+/// Retry/timeout policy for the shared [`ConnectionManager`].
+///
+/// The manager's defaults are tuned for a long-lived server: 6 retries with an
+/// exponential backoff whose *second* delay is ~100s (backon `factor = 100`,
+/// `min_delay = 1s`). For an interactive TUI that would turn any persistent
+/// failure — an untrusted TLS cert, a wrong host, a broker that's down — into a
+/// multi-minute hang at startup instead of a clear error. So we bound it: a
+/// per-attempt connect timeout and a short, capped backoff, so a bad connection
+/// surfaces its real error within seconds. Auto-refresh re-attempts on the next
+/// poll, so a brief blip still recovers.
+fn connection_manager_config() -> ConnectionManagerConfig {
+    ConnectionManagerConfig::new()
+        .set_connection_timeout(Duration::from_secs(8))
+        .set_number_of_retries(3)
+        .set_max_delay(1_500)
+}
+
+/// Parse `url` into a [`ConnectionInfo`], applying [`ConnectOptions`].
+///
+/// TLS is chosen by the scheme (redis-rs maps `rediss://` to a `TcpTls`
+/// address). `insecure` flips off certificate verification, but only for a TLS
+/// address — pairing `--insecure` with a plaintext `redis://` URL is a hard
+/// error (a silent no-op there would be a security foot-gun).
+fn connection_info(url: &str, opts: &ConnectOptions) -> Result<ConnectionInfo> {
+    let mut info = url.into_connection_info()?;
+    if opts.insecure {
+        match &mut info.addr {
+            ConnectionAddr::TcpTls { insecure, .. } => *insecure = true,
+            _ => {
+                return Err(Error::InvalidArgument(format!(
+                    "--insecure only applies to TLS connections; \
+                     use a rediss:// URL (got {url:?})"
+                )))
+            }
+        }
+    }
+    Ok(info)
+}
+
 /// Adjust a list length for a deprecated in-list marker (`0:...` at the tail).
 fn adjust_for_marker(len: i64, marker: Option<String>) -> i64 {
     match marker {
@@ -729,5 +805,63 @@ mod tests {
         assert_eq!(adjust_for_marker(1, Some("0:123".into())), 0);
         assert_eq!(adjust_for_marker(5, Some("42".into())), 5);
         assert_eq!(adjust_for_marker(5, None), 5);
+    }
+
+    #[test]
+    fn plaintext_url_stays_tcp() {
+        let info = connection_info("redis://127.0.0.1:6379", &ConnectOptions::default()).unwrap();
+        assert!(matches!(info.addr, ConnectionAddr::Tcp(host, 6379) if host == "127.0.0.1"));
+    }
+
+    #[test]
+    fn rediss_url_selects_verified_tls() {
+        let info = connection_info(
+            "rediss://redis.example.com:6380",
+            &ConnectOptions::default(),
+        )
+        .unwrap();
+        assert!(matches!(
+            info.addr,
+            ConnectionAddr::TcpTls {
+                insecure: false,
+                port: 6380,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn insecure_flag_disables_verification_for_tls() {
+        let info = connection_info(
+            "rediss://redis.example.com:6380",
+            &ConnectOptions { insecure: true },
+        )
+        .unwrap();
+        assert!(matches!(
+            info.addr,
+            ConnectionAddr::TcpTls { insecure: true, .. }
+        ));
+    }
+
+    #[test]
+    fn insecure_url_fragment_is_honoured() {
+        // redis-rs also encodes insecure TLS via the `#insecure` fragment;
+        // both paths must agree.
+        let info = connection_info(
+            "rediss://redis.example.com:6380/#insecure",
+            &ConnectOptions::default(),
+        )
+        .unwrap();
+        assert!(matches!(
+            info.addr,
+            ConnectionAddr::TcpTls { insecure: true, .. }
+        ));
+    }
+
+    #[test]
+    fn insecure_on_plaintext_url_is_rejected() {
+        let err = connection_info("redis://127.0.0.1:6379", &ConnectOptions { insecure: true })
+            .expect_err("plaintext + insecure must error, not silently no-op");
+        assert!(matches!(err, Error::InvalidArgument(_)));
     }
 }

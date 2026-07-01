@@ -38,14 +38,21 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let [header, body, status] = regions(frame.area());
 
     draw_header(frame, header, app);
+    // Each body renderer records the geometry of the rows it drew into `hits`,
+    // a pure function of state + layout; `App::on_mouse` consults the result to
+    // map a click back to the row the keyboard would act on.
+    let mut hits: Vec<crate::app::HitRegion> = Vec::new();
     match app.screen {
-        Screen::Overview => overview::draw(frame, body, app),
-        Screen::Queue => queue::draw(frame, body, app),
-        Screen::Job => job::draw(frame, body, app),
-        Screen::Schedulers => schedulers::draw(frame, body, app),
-        Screen::Workers => workers::draw(frame, body, app),
-        Screen::Events => events::draw(frame, body, app),
+        Screen::Overview => overview::draw(frame, body, app, &mut hits),
+        Screen::Queue => queue::draw(frame, body, app, &mut hits),
+        // The job renderer also reports the detail body's scroll bounds, recorded
+        // for the next input tick (like the hit map) so scrolling stays clamped.
+        Screen::Job => app.detail_view = job::draw(frame, body, app, &mut hits),
+        Screen::Schedulers => schedulers::draw(frame, body, app, &mut hits),
+        Screen::Workers => workers::draw(frame, body, app, &mut hits),
+        Screen::Events => events::draw(frame, body, app, &mut hits),
     }
+    app.mouse_regions = hits;
     draw_status(frame, status, app);
 
     match &app.overlay {
@@ -147,6 +154,17 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         right.push(Span::styled("[read-only]", theme::muted().fg(theme::WARN)));
         right.push(Span::raw("  "));
     }
+    // Mouse capture is on by default, which suspends the terminal's native
+    // text selection — so surface the escape hatch right here (best-practice
+    // discoverable hint) rather than leaving it buried in `?` help. When capture
+    // is off we flag that instead, since off is the non-default mode: the switch
+    // is never silent in either direction.
+    if app.mouse_capture {
+        right.push(Span::styled("⇧/⌥-drag: select", theme::muted()));
+    } else {
+        right.push(Span::styled("mouse:off", theme::muted().fg(theme::WARN)));
+    }
+    right.push(Span::raw("  "));
     let poll = if app.settings.poll_secs == 0 {
         "poll:off".to_string()
     } else {

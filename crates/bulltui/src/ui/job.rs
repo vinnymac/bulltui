@@ -2,18 +2,23 @@
 //! timeline/flow) with scrolling.
 
 use bullmq::{FlowNode, Job};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap,
+};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{flatten_flow, App, DetailView, HitKind, HitRegion};
 use crate::format;
 use crate::state::JobTab;
 use crate::theme;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+/// Returns the scroll bounds of the detail body it drew, which the caller
+/// records into [`App::detail_view`] for the next input tick (the same
+/// render-records-a-layout-fact pattern as the [`HitRegion`] map).
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) -> DetailView {
     let rows = Layout::vertical([
         Constraint::Length(2), // header
         Constraint::Length(1), // tabs
@@ -26,12 +31,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             Paragraph::new(Line::from(Span::styled("No job loaded.", theme::muted()))),
             area,
         );
-        return;
+        return DetailView::default();
     };
 
     draw_header(frame, rows[0], job, app);
     draw_tabs(frame, rows[1], app);
-    draw_content(frame, rows[2], job, app);
+    draw_content(frame, rows[2], job, app, hits)
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, job: &Job, app: &App) {
@@ -84,7 +89,13 @@ fn draw_tabs(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(widget, area);
 }
 
-fn draw_content(frame: &mut Frame, area: Rect, job: &Job, app: &App) {
+fn draw_content(
+    frame: &mut Frame,
+    area: Rect,
+    job: &Job,
+    app: &App,
+    hits: &mut Vec<HitRegion>,
+) -> DetailView {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER))
@@ -92,17 +103,34 @@ fn draw_content(frame: &mut Frame, area: Rect, job: &Job, app: &App) {
             format!(" {} ", app.job_tab.label()),
             theme::header(),
         ));
+    let inner = block.inner(area);
+    let view_h = inner.height;
 
     // The Flow tab is a navigable list, not prose: render it unwrapped (one row
     // per node) so the cursor index maps exactly to a row, and derive the scroll
     // from the cursor so the selection is always on screen.
     if app.job_tab == JobTab::Flow {
-        let inner_h = area.height.saturating_sub(2);
+        let content_h = app
+            .job_flow
+            .as_ref()
+            .map(|r| flatten_flow(r).len())
+            .unwrap_or(0) as u16;
+        let offset = flow_scroll(app.flow_selected, view_h);
         let para = Paragraph::new(flow_text(app))
             .block(block)
-            .scroll((flow_scroll(app.flow_selected, inner_h), 0));
+            .scroll((offset, 0));
         frame.render_widget(para, area);
-        return;
+        render_vscrollbar(frame, area, content_h, offset, view_h);
+        hits.push(HitRegion {
+            kind: HitKind::FlowNode,
+            area: inner,
+            offset: offset as usize,
+            count: content_h as usize,
+        });
+        return DetailView {
+            max_scroll: content_h.saturating_sub(view_h),
+            page: view_h,
+        };
     }
 
     let text = match app.job_tab {
@@ -115,11 +143,56 @@ fn draw_content(frame: &mut Frame, area: Rect, job: &Job, app: &App) {
         JobTab::Flow => unreachable!("flow tab handled above"),
     };
 
+    let wrap = Wrap { trim: false };
+    // Measure the *wrapped* height at the exact render width so the clamp and the
+    // scrollbar reflect what's actually drawn — the content can't be scrolled a
+    // line past its end into empty space, and the thumb never lies. Capped to
+    // `u16::MAX` so a pathological payload truncates rather than wrapping around.
+    let content_h = Paragraph::new(text.clone())
+        .wrap(wrap)
+        .line_count(inner.width.max(1))
+        .min(u16::MAX as usize) as u16;
+    let max_scroll = content_h.saturating_sub(view_h);
+    let offset = app.detail_scroll.min(max_scroll);
     let para = Paragraph::new(text)
         .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((app.detail_scroll, 0));
+        .wrap(wrap)
+        .scroll((offset, 0));
     frame.render_widget(para, area);
+    render_vscrollbar(frame, area, content_h, offset, view_h);
+    DetailView {
+        max_scroll,
+        page: view_h,
+    }
+}
+
+/// Draw a vertical scrollbar on the right border of the bordered content box
+/// `area` when the `content_h`-row body overflows the `view_h`-row viewport.
+/// Chromeless when everything fits — the bar only appears when it means
+/// something. The thumb rides the border column, so it costs no content width.
+fn render_vscrollbar(frame: &mut Frame, area: Rect, content_h: u16, offset: u16, view_h: u16) {
+    if content_h <= view_h {
+        return;
+    }
+    let mut state = ScrollbarState::new(content_h as usize)
+        .viewport_content_length(view_h as usize)
+        .position(offset as usize);
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(Some("│"))
+        .thumb_symbol("█")
+        .track_style(theme::scrollbar_track())
+        .thumb_style(theme::scrollbar_thumb());
+    // Inset past the top/bottom borders; the bar draws in the right border column.
+    frame.render_stateful_widget(
+        bar,
+        area.inner(Margin {
+            horizontal: 0,
+            vertical: 1,
+        }),
+        &mut state,
+    );
 }
 
 /// Vertical scroll offset that keeps the cursor row visible in a viewport

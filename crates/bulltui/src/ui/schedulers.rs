@@ -8,11 +8,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{list_offset, App, HitKind, HitRegion};
 use crate::format;
 use crate::theme;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let widths = [
         Constraint::Length(20), // id
         Constraint::Min(12),    // name
@@ -44,6 +44,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             ))
             .right_aligned(),
         );
+    let inner = block.inner(area);
 
     if app.schedulers.is_empty() {
         let msg = Paragraph::new(Line::from(Span::styled(
@@ -90,10 +91,23 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .row_highlight_style(theme::selected())
         .highlight_symbol("▌");
 
-    let mut state = TableState::default();
-    state.select(Some(
-        app.scheduler_selected
-            .min(app.schedulers.len().saturating_sub(1)),
-    ));
+    let sel = app
+        .scheduler_selected
+        .min(app.schedulers.len().saturating_sub(1));
+    let rows_h = inner.height.saturating_sub(1); // header occupies inner.y
+    let offset = list_offset(sel, rows_h as usize, app.schedulers.len());
+    let mut state = TableState::default().with_offset(offset);
+    state.select(Some(sel));
     frame.render_stateful_widget(table, area, &mut state);
+    hits.push(HitRegion {
+        kind: HitKind::Scheduler,
+        area: Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: rows_h,
+        },
+        offset,
+        count: app.schedulers.len(),
+    });
 }

@@ -6,6 +6,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 authors.workspace = true
 default-run = "bulltui"
 
@@ -23,7 +27,10 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 futures-util = { workspace = true }
-ratatui = "0.30.2"
+# `unstable-rendered-line-info` exposes `Paragraph::line_count(width)`, which the
+# job-detail scrollview uses to measure exact wrapped content height so the
+# scrollbar and scroll clamp never lie (no scrolling past the end into void).
+ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 tachyonfx = { version = "0.25", features = ["sendable"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -33,3 +40,24 @@ arboard = { version = "3", default-features = false }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 testcontainers = "0.23"
+
+# --- npm distribution (cargo-npm) -------------------------------------------
+# Ship the `bulltui` binary to npm so JS / BullMQ devs can `npx bulltui`.
+#   cargo install --locked cargo-npm
+#   cargo npm generate --clean   # collects per-target binaries from target/
+#   cargo npm publish            # main pkg + per-platform binary pkgs
+# Building every target at once is easiest with cargo-zigbuild or a CI matrix.
+[package.metadata.npm]
+name = "bulltui"
+bins = ["bulltui"]
+# Platform packages are unscoped (bulltui-linux-x64, bulltui-darwin-arm64, …).
+# Set `prefix = "@vinnymac/bulltui-"` to publish them under an npm scope instead.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]

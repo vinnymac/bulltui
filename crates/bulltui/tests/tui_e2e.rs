@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use bullmq::{EventKind, JobState, QueueEvent};
-use bulltui::app::{App, Screen};
+use bulltui::app::{App, HitKind, Screen};
 use bulltui::cli::Args;
 use bulltui::state::{EventScope, JobTab, StatusTab, WorkersTab};
 use bulltui::ui;
 use clap::Parser;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
@@ -85,6 +85,33 @@ async fn type_str(app: &mut App, s: &str) {
     for c in s.chars() {
         press(app, KeyCode::Char(c)).await;
     }
+}
+
+/// Inject a synthetic left-click at `(col, row)` — the mouse analogue of
+/// `press`. Hit-testing reads the regions recorded by the previous `render`, so
+/// callers render first (exactly as the run loop draws before reading events).
+async fn click(app: &mut App, col: u16, row: u16) {
+    app.on_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .await;
+}
+
+async fn wheel(app: &mut App, down: bool) {
+    app.on_mouse(MouseEvent {
+        kind: if down {
+            MouseEventKind::ScrollDown
+        } else {
+            MouseEventKind::ScrollUp
+        },
+        column: 1,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    })
+    .await;
 }
 
 async fn tab_to(app: &mut App, state: JobState) {
@@ -206,6 +233,64 @@ async fn flow_tab_drills_into_a_child_job() {
     let child = app.job.as_ref().unwrap();
     assert_eq!(child.name, "collect", "opened a collect child");
     assert_ne!(child.id, parent_id, "now viewing a different job");
+}
+
+#[tokio::test]
+async fn job_detail_body_scrolls_within_bounds_with_a_scrollbar() {
+    let (_c, mut app) = seeded_app().await;
+
+    // emails has permanently-failed `fail` jobs (attempts: 1) whose worker throws
+    // `boom for <id>` — a real multi-line Node stacktrace on the Error tab.
+    press(&mut app, KeyCode::Enter).await; // open emails (sorts first)
+    assert_eq!(app.queue_name.as_deref(), Some("emails"));
+    tab_to(&mut app, JobState::Failed).await;
+    assert!(!app.jobs.is_empty(), "failed jobs present");
+    press(&mut app, KeyCode::Enter).await; // open a failed job
+    assert_eq!(app.screen, Screen::Job);
+    job_tab_to(&mut app, JobTab::Error).await;
+
+    // A short viewport guarantees the stacktrace overflows. The render records
+    // the exact (wrapped) scroll bounds into `detail_view`.
+    let _ = render(&mut app, 100, 14);
+    assert!(
+        app.detail_view.max_scroll > 0,
+        "the error content overflows the viewport (max_scroll {})",
+        app.detail_view.max_scroll
+    );
+    assert_eq!(app.detail_scroll, 0, "opens at the top");
+
+    // Hammering Down past the end clamps to the last line — never into the void.
+    for _ in 0..100 {
+        press(&mut app, KeyCode::Down).await;
+    }
+    let max = app.detail_view.max_scroll;
+    assert_eq!(app.detail_scroll, max, "clamped at the bottom, not past it");
+
+    // Home returns to the top; End jumps back to the bottom.
+    press(&mut app, KeyCode::Home).await;
+    assert_eq!(app.detail_scroll, 0, "Home → top");
+    press(&mut app, KeyCode::End).await;
+    assert_eq!(app.detail_scroll, max, "End → bottom");
+
+    // PageUp from the bottom steps back by a viewport-worth (never negative).
+    press(&mut app, KeyCode::PageUp).await;
+    assert!(
+        app.detail_scroll < max,
+        "PageUp steps back up from the bottom"
+    );
+
+    // A scrollbar thumb (█) is drawn on the right border when content overflows —
+    // and only then; the Error tab has no other █ glyph.
+    let text = render(&mut app, 100, 14);
+    assert!(
+        text.contains('█'),
+        "a scrollbar thumb renders while the body overflows:\n{text}"
+    );
+
+    // Switching tabs resets the scroll (cycle_job_tab), so a short tab can't
+    // inherit a tall tab's offset and strand its content off-screen.
+    press(&mut app, KeyCode::Tab).await; // Error → Logs
+    assert_eq!(app.detail_scroll, 0, "tab switch resets scroll to the top");
 }
 
 #[tokio::test]
@@ -522,4 +607,120 @@ async fn redis_stats_overlay_renders() {
     assert!(text.contains("Redis"), "redis modal title:\n{text}");
     assert!(text.contains("Version"), "version field:\n{text}");
     assert!(text.contains("Connected clients"), "clients field");
+}
+
+#[tokio::test]
+async fn mouse_click_selects_then_opens_queue() {
+    let (_c, mut app) = seeded_app().await;
+    // Queue order is what the overview actually draws (sorted by name).
+    let names: Vec<String> = app
+        .visible_queues()
+        .iter()
+        .map(|q| q.name.clone())
+        .collect();
+    assert!(names.len() >= 2, "need ≥2 queues, got {}", names.len());
+
+    // Render first so the click hit map reflects the drawn rows.
+    let _ = render(&mut app, 120, 30);
+    let region = *app
+        .mouse_regions
+        .iter()
+        .find(|r| r.kind == HitKind::OverviewQueue)
+        .expect("overview registers a clickable region");
+
+    // The second visible row maps to queue index 1. A first click only moves the
+    // cursor there (no double-click timer needed).
+    let (x, y) = (region.area.x + 1, region.area.y + 1);
+    click(&mut app, x, y).await;
+    assert_eq!(app.overview_selected, 1, "click moved the cursor");
+    assert_eq!(app.screen, Screen::Overview, "first click only selects");
+
+    // A second click on the now-selected row opens it.
+    let _ = render(&mut app, 120, 30);
+    click(&mut app, x, y).await;
+    assert_eq!(app.screen, Screen::Queue, "second click opened the queue");
+    assert_eq!(
+        app.queue_name.as_deref(),
+        Some(names[1].as_str()),
+        "opened the queue under the click"
+    );
+}
+
+#[tokio::test]
+async fn mouse_click_opens_a_job_row() {
+    let (_c, mut app) = seeded_app().await;
+    press(&mut app, KeyCode::Enter).await; // open emails (Latest tab has jobs)
+    assert_eq!(app.screen, Screen::Queue);
+    assert!(!app.visible_jobs().is_empty(), "emails has jobs");
+
+    let _ = render(&mut app, 120, 30);
+    let region = *app
+        .mouse_regions
+        .iter()
+        .find(|r| r.kind == HitKind::Job)
+        .expect("queue registers a clickable job region");
+
+    // Row 0 is the default selection, so a single click on it opens the job —
+    // this also exercises the bordered-table geometry (data rows start one row
+    // below the in-block header).
+    click(&mut app, region.area.x + 1, region.area.y).await;
+    assert_eq!(
+        app.screen,
+        Screen::Job,
+        "clicking the selected job row opened its detail"
+    );
+}
+
+#[tokio::test]
+async fn mouse_wheel_moves_overview_selection() {
+    let (_c, mut app) = seeded_app().await;
+    let _ = render(&mut app, 120, 30);
+    assert_eq!(app.overview_selected, 0, "starts at the top");
+    wheel(&mut app, true).await;
+    assert_eq!(app.overview_selected, 1, "wheel down moves the cursor");
+    wheel(&mut app, false).await;
+    assert_eq!(app.overview_selected, 0, "wheel up moves back");
+}
+
+#[tokio::test]
+async fn mouse_capture_defaults_on_and_toggles_in_header() {
+    let (_c, mut app) = seeded_app().await;
+    assert!(
+        app.mouse_capture,
+        "on by default (mainstream TUI posture); --no-mouse starts it off"
+    );
+
+    // Default-on suspends native selection, so the header surfaces the
+    // Shift/⌥-drag escape hatch rather than a bare mode chip.
+    let text = render(&mut app, 120, 30);
+    assert!(
+        text.contains("drag: select"),
+        "header surfaces the text-selection escape hatch when captured:\n{text}"
+    );
+    assert!(
+        !text.contains("mouse:off"),
+        "no off-flag while captured:\n{text}"
+    );
+
+    app.on_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL))
+        .await;
+    assert!(!app.mouse_capture, "Ctrl+O dropped capture");
+    let text = render(&mut app, 120, 30);
+    assert!(
+        text.contains("mouse:off"),
+        "header flags the non-default off mode — never silent:\n{text}"
+    );
+    assert!(
+        !text.contains("drag: select"),
+        "no selection hint once native selection is restored:\n{text}"
+    );
+
+    app.on_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL))
+        .await;
+    assert!(app.mouse_capture, "Ctrl+O turned capture back on");
+    let text = render(&mut app, 120, 30);
+    assert!(
+        text.contains("drag: select"),
+        "selection hint returns when captured again:\n{text}"
+    );
 }

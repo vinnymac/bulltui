@@ -49,3 +49,23 @@ snapshot:
 # Build an optimized release binary.
 build:
     cargo build --release -p bulltui
+
+# --- packaging ---------------------------------------------------------------
+
+# Build the distroless container image.
+docker-build:
+    docker build -t bulltui .
+
+# Run the container image. Pass bulltui flags, e.g. `just docker-run --url redis://host.docker.internal:6380`.
+docker-run *ARGS:
+    docker run --rm -it bulltui {{ARGS}}
+
+# Generate the npm packages (main + per-platform) from built target binaries.
+# Build the per-target release binaries first (e.g. `cargo zigbuild --release`
+# for each triple in [package.metadata.npm].targets). Needs `cargo install cargo-npm`.
+npm-pack:
+    cargo npm generate --clean
+
+# Publish the generated npm packages (needs `npm login` or NODE_AUTH_TOKEN).
+npm-publish:
+    cargo npm publish

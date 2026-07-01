@@ -7,12 +7,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Tabs};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{list_offset, App, HitKind, HitRegion};
 use crate::format;
 use crate::state::StatusTab;
 use crate::theme;
 
-pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+pub fn draw(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let rows = Layout::vertical([
         Constraint::Length(1), // info
         Constraint::Length(1), // tabs
@@ -22,7 +22,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
 
     draw_info(frame, rows[0], app);
     draw_tabs(frame, rows[1], app);
-    draw_table(frame, rows[2], app);
+    draw_table(frame, rows[2], app, hits);
 }
 
 fn draw_info(frame: &mut Frame, area: Rect, app: &App) {
@@ -224,7 +224,7 @@ fn job_cells(tab: StatusTab, job: &Job, now: i64) -> Vec<Cell<'static>> {
     }
 }
 
-fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_table(frame: &mut Frame, area: Rect, app: &App, hits: &mut Vec<HitRegion>) {
     let (mut headers, mut widths) = columns(app.status_tab);
     // A leading 2-col gutter for the multi-select check mark.
     headers.insert(0, "");
@@ -264,6 +264,7 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(theme::BORDER_FOCUS))
         .title(Span::styled(title, theme::header()))
         .title_bottom(Line::from(Span::styled(bottom, theme::muted())).right_aligned());
+    let inner = block.inner(area);
 
     if jobs.is_empty() {
         let empty = if app.job_filter.is_some() {
@@ -296,7 +297,21 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
         .row_highlight_style(theme::selected())
         .highlight_symbol("▌");
 
-    let mut state = TableState::default();
-    state.select(Some(app.job_selected.min(jobs.len().saturating_sub(1))));
+    let sel = app.job_selected.min(jobs.len().saturating_sub(1));
+    let rows_h = inner.height.saturating_sub(1); // header occupies inner.y
+    let offset = list_offset(sel, rows_h as usize, jobs.len());
+    let mut state = TableState::default().with_offset(offset);
+    state.select(Some(sel));
     frame.render_stateful_widget(table, area, &mut state);
+    hits.push(HitRegion {
+        kind: HitKind::Job,
+        area: Rect {
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: rows_h,
+        },
+        offset,
+        count: jobs.len(),
+    });
 }

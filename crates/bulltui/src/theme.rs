@@ -18,6 +18,17 @@ pub const DANGER: Color = Color::Red;
 pub const LIVE: Color = Color::Rgb(0x53, 0xE0, 0x6A);
 pub const LIVE_DIM: Color = Color::Rgb(0x1C, 0x4A, 0x27);
 
+/// The "connecting" amber for the boot LED — shown while the connection is being
+/// established, before it settles to the live green (or, on failure, red). A
+/// distinct warm tone so the handshake reads as *in progress*, not stalled.
+pub const CONNECTING: Color = Color::Rgb(0xE0, 0xA5, 0x30);
+
+/// The boot splash's `BULLTUI` dot-matrix: a lit dot and its warming-up glow.
+/// The reveal fades *between these two* (never from black), so it reads as an
+/// LED sign powering on rather than emerging from a harsh void.
+pub const SPLASH_DOT: Color = Color::Rgb(0x4F, 0xD6, 0xE6);
+pub const SPLASH_DOT_DIM: Color = Color::Rgb(0x16, 0x3E, 0x47);
+
 pub const SELECTION_BG: Color = Color::Indexed(238);
 pub const HEADER_FG: Color = Color::Cyan;
 
@@ -41,6 +52,18 @@ pub fn selected() -> Style {
 
 pub fn key_hint() -> Style {
     Style::default().fg(ACCENT)
+}
+
+/// The moving thumb of a scrollbar — the accent so it reads as the interactive
+/// element against the muted border track.
+pub fn scrollbar_thumb() -> Style {
+    Style::default().fg(ACCENT)
+}
+
+/// The static track a scrollbar thumb rides in — the border tone, so it settles
+/// into the frame rather than competing with the content.
+pub fn scrollbar_track() -> Style {
+    Style::default().fg(BORDER)
 }
 
 /// Style for the multi-select check mark on a chosen row.
