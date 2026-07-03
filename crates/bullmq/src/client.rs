@@ -436,7 +436,7 @@ impl BullClient {
         }
         let hashes: Vec<HashMap<String, String>> = pipe.query_async(&mut conn).await?;
         let mut jobs = Vec::with_capacity(ids.len());
-        for (id, hash) in ids.iter().zip(hashes.into_iter()) {
+        for (id, hash) in ids.iter().zip(hashes) {
             if let Some(job) = Job::from_hash(id, &hash) {
                 jobs.push(job);
             }

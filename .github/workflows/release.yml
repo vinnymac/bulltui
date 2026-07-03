@@ -2,7 +2,7 @@ name: Release
 
 # Triggered by a v* tag (pushed by the auto-tag job in version.yml after a
 # changesets version PR is merged). Builds all platform binaries in parallel,
-# then publishes the per-platform npm packages followed by the root package.
+# then publishes the per-platform npm packages, root package, and Docker image.
 
 on:
   push:
@@ -109,3 +109,102 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+
+  docker:
+    name: Build Docker image (${{ matrix.arch }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-latest
+            artifact: bulltui-linux-x64
+          - arch: arm64
+            os: ubuntu-24.04-arm
+            artifact: bulltui-linux-arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download binary
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - name: Mark binary executable
+        run: chmod +x dist/bulltui
+      - name: Write release Dockerfile
+        run: |
+          cat > Dockerfile.release << 'EOF'
+          FROM gcr.io/distroless/cc-debian12:nonroot
+          COPY dist/bulltui /usr/local/bin/bulltui
+          ENV TERM=xterm-256color
+          ENTRYPOINT ["/usr/local/bin/bulltui"]
+          EOF
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.release
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=ghcr.io/vinnymac/bulltui,push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        run: |
+          mkdir -p digests
+          echo -n "${{ steps.build.outputs.digest }}" > digests/${{ matrix.arch }}
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-digest-${{ matrix.arch }}
+          path: digests/${{ matrix.arch }}
+          if-no-files-found: error
+
+  docker-merge:
+    name: Merge Docker manifests
+    needs: docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: docker-digest-*
+          path: digests
+          merge-multiple: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/vinnymac/bulltui
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf 'ghcr.io/vinnymac/bulltui@%s ' $(cat digests/*))
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}

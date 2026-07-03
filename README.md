@@ -4,10 +4,7 @@
 [![Downloads](https://img.shields.io/npm/dm/bulltui.svg)](https://www.npmjs.com/package/bulltui)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-A fast, keyboard-driven terminal UI for [BullMQ](https://docs.bullmq.io/) — with
-feature parity with [bull-board](https://github.com/felixmosh/bull-board), in
-your terminal. Written in Rust with [ratatui](https://ratatui.rs); it talks to
-Redis/Valkey **directly**, so there's no Node.js runtime to stand up.
+A fast, keyboard-driven terminal UI for [BullMQ](https://docs.bullmq.io/). Written in Rust with [ratatui](https://ratatui.rs), it connects to Redis/Valkey directly.
 
 <!-- Demo: drop the recorded gif at assets/demo.gif -->
 ![bulltui](assets/demo.gif)
@@ -15,14 +12,14 @@ Redis/Valkey **directly**, so there's no Node.js runtime to stand up.
 ## Install
 
 ```sh
-# run it straight from npm, no install needed
+# run via npx
 npx bulltui
 
 # or install globally
 npm install -g bulltui
 
-# Docker — see "Containers" below
-docker run --rm -it vinnymac/bulltui --url redis://my-redis:6379
+# Docker
+docker run --rm -it ghcr.io/vinnymac/bulltui --url redis://my-redis:6379
 ```
 
 ## Usage
@@ -38,41 +35,25 @@ bulltui --splash-preview                # hold the splash on screen (any key exi
 bulltui --snapshot                      # render one frame to stdout and exit
 ```
 
-`BULLTUI_REDIS_URL` and `BULLTUI_PREFIX` mirror `--url` / `--prefix`. Run
-`bulltui --help` for the full flag list.
+`BULLTUI_REDIS_URL` and `BULLTUI_PREFIX` mirror `--url` / `--prefix`. Run `bulltui --help` for the full flag list.
 
 ### TLS
 
-Use a `rediss://` URL to connect over TLS — the norm for managed brokers such
-as AWS ElastiCache (in-transit encryption), Upstash, Redis Cloud, and Azure
-Cache. The server certificate is verified against a CA bundle compiled into the
-binary (Mozilla's roots via `webpki-roots`), so there's nothing to install —
-even in the distroless image.
+Use a `rediss://` URL to connect over TLS, the standard for managed brokers like AWS ElastiCache (in-transit encryption), Upstash, Redis Cloud, and Azure Cache. The binary bundles Mozilla's CA roots via `webpki-roots`.
 
 ```sh
 bulltui --url rediss://user:pass@my-redis.example.com:6380
 ```
 
-For a broker with a self-signed or private-CA certificate on a trusted network,
-`--insecure` skips certificate verification. This disables authentication of the
-server (man-in-the-middle exposure), so reach for it only when you understand
-the trade-off; it errors on a plaintext `redis://` URL rather than doing nothing.
+For a broker with a self-signed or private-CA certificate on a trusted network, `--insecure` skips certificate verification. Use this only when you understand the trade-off. It rejects plaintext `redis://` URLs.
 
 ## Features
 
-- **Every bull-board operation** — pause/resume (incl. all queues), empty,
-  obliterate, clean, retry-/promote-all, add jobs, set concurrency; per-job
-  retry, promote, remove, duplicate, update.
-- **Full job detail** — data, options, progress, error + stack trace, logs,
-  timeline, and a navigable parent→children **Flow** tree.
-- **Beyond bull-board** — a live `XREAD` **events feed**, a **workers/busy**
-  view with lock-TTL health, **job schedulers** with next-run countdowns, a
-  fuzzy **command palette**, and multi-select **bulk** actions.
-- **Verified against real BullMQ** — a Node seeder drives authentic
-  queues/jobs/flows; Rust e2e tests assert the client and TUI reproduce
-  bullmq's own view.
-- **Works over SSH & tmux** — vim-style keys throughout; `y` copies any detail
-  tab to the clipboard via OSC 52.
+- **Every bull-board operation**: pause/resume (including all queues), empty, obliterate, clean, retry all, promote all, add jobs, set concurrency, and per-job retry, promote, remove, duplicate, update.
+- **Full job detail**: data, options, progress, error and stack trace, logs, timeline, and a navigable parent-to-children Flow tree.
+- **Beyond bull-board**: a live `XREAD` events feed, a workers/busy view with lock-TTL health, job schedulers with next-run countdowns, a fuzzy command palette, and multi-select bulk actions.
+- **Verified against real BullMQ**: Rust end-to-end tests assert the client and TUI reproduce BullMQ's own view.
+- **Works over SSH and tmux**: vim-style keys throughout. `y` copies any detail tab to the clipboard via OSC 52.
 
 ## Keys
 
@@ -82,19 +63,15 @@ the trade-off; it errors on a plaintext `redis://` URL rather than doing nothing
 
 ## Containers
 
-bulltui ships as a small, distroless container image, so you can run it on
-cloud infra without a Node or Rust toolchain.
+bulltui ships as a small, distroless container image.
 
 ```sh
-docker build -t bulltui .
-docker run --rm -it bulltui --url redis://host.docker.internal:6379
+docker run --rm -it ghcr.io/vinnymac/bulltui --url redis://host.docker.internal:6379
 ```
 
 ### Kubernetes
 
-Reach a Redis/Valkey that only lives inside your cluster's VPC by running
-bulltui as an ephemeral pod right next to it — no port-forward, no public
-exposure:
+Run bulltui as an ephemeral pod to reach a Redis/Valkey instance inside your cluster's VPC:
 
 ```sh
 kubectl run bulltui --rm -it --restart=Never \
@@ -102,24 +79,19 @@ kubectl run bulltui --rm -it --restart=Never \
   --env="BULLTUI_REDIS_URL=redis://redis.default.svc.cluster.local:6379"
 ```
 
-`-it` gives the TUI a TTY and `--rm` cleans the pod up on exit. Point
-`BULLTUI_REDIS_URL` at the in-cluster Service DNS name (or ClusterIP) of your
-broker; set `BULLTUI_PREFIX` if you don't use the default `bull`. For a managed
-broker outside the cluster, use a `rediss://` URL (see [TLS](#tls)).
+`-it` gives the TUI a TTY and `--rm` cleans the pod up on exit. Point `BULLTUI_REDIS_URL` at the in-cluster Service DNS name (or ClusterIP) of your broker. Set `BULLTUI_PREFIX` if you use a prefix other than `bull`. For a managed broker outside the cluster, use a `rediss://` URL (see [TLS](#tls)).
 
 ## Development
 
 ```sh
 just            # list tasks
 just check      # fmt-check + clippy
-just test       # full workspace suite (needs Docker + Node)
+just test       # full workspace suite (needs Docker)
 just demo       # start a local Valkey + seed it
 just run        # run against the demo Valkey
 ```
 
-The workspace is two crates: [`bullmq`](crates/bullmq) — a reusable,
-direct-to-Redis BullMQ client (reads + admin writes) — and
-[`bulltui`](crates/bulltui), the ratatui TUI built on top of it.
+The workspace is two crates: [`bullmq`](crates/bullmq), a reusable direct-to-Redis BullMQ client (reads and admin writes), and [`bulltui`](crates/bulltui), the ratatui TUI built on top of it.
 
 ## License
 

@@ -12,7 +12,20 @@ importers:
         specifier: ^2.27.0
         version: 2.31.0
 
-  npm/bulltui: {}
+  npm/bulltui:
+    optionalDependencies:
+      bulltui-darwin-arm64:
+        specifier: '*'
+        version: 0.1.0
+      bulltui-darwin-x64:
+        specifier: '*'
+        version: 0.1.0
+      bulltui-linux-arm64:
+        specifier: '*'
+        version: 0.1.0
+      bulltui-linux-x64:
+        specifier: '*'
+        version: 0.1.0
 
 packages:
 
@@ -130,6 +143,30 @@ packages:
   braces@3.0.3:
     resolution: {integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==}
     engines: {node: '>=8'}
+
+  bulltui-darwin-arm64@0.1.0:
+    resolution: {integrity: sha512-PeT3zLVtGqwcfka6Wiq4kdx58d1xILggYvGvU7aG9PPA/W8h+YScRj3QbaJj3n7CWXUtNNtriqNpYV2zy4cpvQ==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
+  bulltui-darwin-x64@0.1.0:
+    resolution: {integrity: sha512-a6NNNJxVLGVlklK8PF9yrhwo7GlpEaUFwUM53otYxKbFZEZ02XLD0YRtY1PoL1Bd3q0s29MdFmS4AmL2iZ86Hg==}
+    cpu: [x64]
+    os: [darwin]
+    hasBin: true
+
+  bulltui-linux-arm64@0.1.0:
+    resolution: {integrity: sha512-NL/7cu/OAI583f0KJLRHyLmjxbgyj+0WQwpl2s+DAcrmQhaPezqFHZbdqUvXnQRrawmexFghCMcgpqCXur2Oyw==}
+    cpu: [arm64]
+    os: [linux]
+    hasBin: true
+
+  bulltui-linux-x64@0.1.0:
+    resolution: {integrity: sha512-tsD7TnvWRlOtsxw+BhWlIoMvZ+PwPyMqVSlwmDDT6nDDJR4fjmAr8CTZP14wtTja6ta8rP8ZGih3TtUdoU4V2Q==}
+    cpu: [x64]
+    os: [linux]
+    hasBin: true
 
   chardet@2.2.0:
     resolution: {integrity: sha512-rddelWYNPRrXq6PtNEN2S3f6t9ILzvqaN5pVgi4kqt9jHQaXIial9PznB5iSPVlQSLNaaH22ItWz3EJtQ10+OA==}
@@ -588,6 +625,18 @@ snapshots:
   braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
+
+  bulltui-darwin-arm64@0.1.0:
+    optional: true
+
+  bulltui-darwin-x64@0.1.0:
+    optional: true
+
+  bulltui-linux-arm64@0.1.0:
+    optional: true
+
+  bulltui-linux-x64@0.1.0:
+    optional: true
 
   chardet@2.2.0: {}
 
