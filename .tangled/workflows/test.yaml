@@ -1,13 +1,13 @@
-trigger:
+when:
   - event: ["push", "pull_request"]
     branch: ["main"]
 
 engine: microvm
 
 dependencies:
-  nixpkgs:
-    - rustc
-    - cargo
+  - rustc
+  - cargo
+  - gcc
 
 environment:
   CARGO_TERM_COLOR: always
