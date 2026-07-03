@@ -22,18 +22,17 @@ async fn main() -> anyhow::Result<()> {
         return result;
     }
 
-    // Interactive: the terminal comes up first, then the connection runs behind
-    // an animated splash / "connecting" screen (see `boot`). This is why a slow
-    // or TLS broker shows life instead of a frozen terminal during the handshake.
+    // Interactive: the terminal starts before the connection. The connection runs
+    // behind an animated splash / "connecting" screen (see `boot`), so a slow or
+    // TLS broker does not freeze the terminal during the handshake.
     let mut terminal = ratatui::init();
     let result = match boot::splash_and_connect(&mut terminal, &args).await {
         Ok(Some(client)) => app::run(&mut terminal, client, args).await,
         Ok(None) => Ok(()), // user cancelled during connect
         Err(e) => Err(e),   // connection failed
     };
-    // Teardown safety net: `ratatui::restore()` leaves mouse capture alone (it
-    // never enabled it), so clear it unconditionally in case we exited early
-    // with capture still on. Idempotent when it was already off.
+    // `ratatui::restore()` does not touch mouse capture (it never enabled it),
+    // so disable it unconditionally here. Idempotent when already off.
     let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     ratatui::restore();
     result

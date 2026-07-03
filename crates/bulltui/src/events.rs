@@ -1,9 +1,8 @@
 //! Background orchestration for the live events feed.
 //!
-//! A tokio task owns a *dedicated* Redis connection, tails the queue event
-//! streams with a blocking `XREAD`, and forwards batches over an `mpsc` channel
-//! to the run loop. It is lazy-spawned when the Events screen opens and torn
-//! down on exit, so it costs nothing when unused. See ADR-0001.
+//! A tokio task owns a dedicated Redis connection, tails queue event streams
+//! with a blocking `XREAD`, and forwards batches over an `mpsc` channel. It
+//! spawns lazily when the Events screen opens and shuts down on exit.
 
 use std::time::Duration;
 
@@ -16,8 +15,7 @@ const BATCH: usize = 256;
 const BACKOFF_START_MS: u64 = 250;
 const BACKOFF_MAX_MS: u64 = 5000;
 
-/// A running event-stream task. Call [`shutdown`](EventStreamHandle::shutdown)
-/// to stop it.
+/// A running event-stream task.
 pub struct EventStreamHandle {
     shutdown: watch::Sender<bool>,
     task: JoinHandle<()>,

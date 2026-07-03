@@ -13,8 +13,8 @@ use crate::format;
 use crate::state::WorkersTab;
 use crate::theme;
 
-/// Operator assumption for the lock-health colour denominator (BullMQ default
-/// `lockDuration`). Per ADR-0002 the raw TTL is always shown, never replaced.
+/// Assumed lock duration for lock-health color (matches BullMQ's default
+/// `lockDuration` of 30s). The raw TTL is always shown alongside.
 const ASSUMED_LOCK_MS: i64 = 30_000;
 const AT_RISK_MS: i64 = 5_000;
 

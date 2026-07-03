@@ -113,11 +113,10 @@ pub enum HitKind {
     Event,
 }
 
-/// A band of 1-row list entries the renderer drew this frame, with the scroll
-/// offset and item count needed to turn a click row back into an item index.
-/// Rebuilt every frame by the UI ([`crate::ui::draw`]) — a pure function of
-/// state + layout, so it never reads the clock or touches effects and stays
-/// deterministic under `TestBackend`.
+/// A band of 1-row list entries drawn this frame, with the scroll offset and
+/// item count needed to map a click back to an item index. Rebuilt every frame
+/// by [`crate::ui::draw`]; pure (no clock, no effects), so `TestBackend` output
+/// is deterministic.
 #[derive(Debug, Clone, Copy)]
 pub struct HitRegion {
     pub kind: HitKind,
@@ -129,23 +128,16 @@ pub struct HitRegion {
     pub count: usize,
 }
 
-/// Scroll bounds of the job-detail body captured by the last [`crate::ui::draw`]
-/// — a layout fact recorded for the next input tick, exactly like the
-/// [`HitRegion`] map (a pure function of state + layout, so it stays
-/// deterministic under `TestBackend`). `max_scroll` is the largest in-bounds
-/// `detail_scroll` (content height minus the viewport); `page` is the viewport
-/// height (a PageUp/PageDown step). Both are `0` until the first render and
-/// whenever the content already fits — so scrolling is a no-op when there's
-/// nothing to reveal, never a scroll into empty space.
+/// Scroll bounds of the job-detail body, recorded by the last render.
+/// `max_scroll` = content height minus viewport height; `page` = viewport height.
+/// Both are `0` until first render or when content fits without scrolling.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DetailView {
     pub max_scroll: u16,
     pub page: u16,
 }
 
-/// Clamp a vertical scroll move to `[0, max]` — the bound the last render
-/// recorded — so the detail body can never be scrolled past its content into
-/// empty space. Pure, so it's unit-tested without spinning up an `App`.
+/// Clamp a vertical scroll delta to `[0, max]`. Pure; unit-testable without `App`.
 pub(crate) fn clamp_scroll(current: u16, delta: isize, max: u16) -> u16 {
     (current as isize + delta).clamp(0, max as isize) as u16
 }
@@ -164,9 +156,8 @@ impl HitRegion {
     }
 }
 
-/// First visible index for a viewport `height` rows tall that keeps `selected`
-/// on screen — the single windowing rule shared by every list renderer and the
-/// mouse hit map, so a click resolves to exactly the row that's drawn.
+/// First visible index for a `height`-row viewport that keeps `selected` on
+/// screen. Shared by every list renderer and the mouse hit map.
 pub fn list_offset(selected: usize, height: usize, count: usize) -> usize {
     if height == 0 || count == 0 {
         return 0;
@@ -192,8 +183,8 @@ pub struct App {
     /// Whether the most recent data fetch reached Redis. Drives the connection
     /// indicator (pulsing green when true, static red when false).
     pub connected: bool,
-    /// Animation state. Enqueued by state transitions, advanced only by the
-    /// real run loop via [`App::render_effects`] — never in tests.
+    /// Animation state. Enqueued by state transitions; advanced only by the
+    /// real run loop via [`App::render_effects`], never in tests.
     pub animations: crate::fx::Animations,
 
     pub screen: Screen,
@@ -274,12 +265,9 @@ pub struct App {
     pub metrics: Option<(Metrics, Metrics)>, // (completed, failed)
 
     // mouse navigation (on by default; strictly additive to the keyboard)
-    /// Whether the terminal is capturing mouse events. On by default (the
-    /// mainstream TUI posture); the run loop enables/disables capture to match.
-    /// When true the terminal's native click-drag selection is suspended, so the
-    /// escape hatches are `Shift`/`⌥`-drag (native selection while captured) and
-    /// `Ctrl+O` (drop capture); `y`/OSC-52 copies regardless. When false the
-    /// native selection is fully restored. Seeded from `--no-mouse`.
+    /// Whether the terminal is capturing mouse events (on by default). When
+    /// true, native click-drag selection is suspended; `Shift`/`⌥`-drag restores
+    /// it, `Ctrl+O` drops capture entirely. Seeded from `--no-mouse`.
     pub mouse_capture: bool,
     /// Clickable list bands recorded by the last [`crate::ui::draw`]. Consulted
     /// by [`App::on_mouse`] to map a click to the row the keyboard would act on.
@@ -549,8 +537,7 @@ impl App {
         if !names.is_empty() {
             self.connected = any_ok;
         }
-        // Animate a soft shimmer when a refresh (not the first load) brings
-        // changed queue counts — the live "something happened" signal.
+        // Shimmer on changed counts to signal a live update (skipped on first load).
         if !self.queues.is_empty() && overview_sig(&self.queues) != overview_sig(&summaries) {
             self.animations.live_update();
         }
@@ -766,7 +753,7 @@ impl App {
                 self.set_error(format!("busy: {e}"));
             }
         }
-        // Roster via CLIENT LIST — surface permission errors inline, not silently.
+        // Roster via CLIENT LIST; surface permission errors inline.
         match self.client.list_workers().await {
             Ok(w) => {
                 if self.worker_selected >= w.len() {
@@ -1226,8 +1213,7 @@ impl App {
                     self.flow_selected = idx;
                 }
             }
-            // Schedulers and the Roster have no per-row "open", so a click only
-            // selects — matching what the keyboard can do there.
+            // Schedulers and Roster have no per-row drill-in; click only selects.
             HitKind::Scheduler => self.scheduler_selected = idx,
             HitKind::Worker => self.worker_selected = idx,
             HitKind::ActiveLock => {
@@ -2361,7 +2347,7 @@ impl App {
         items.push(PaletteItem::new("help", vec!["keys"], Command::Help));
         items.push(PaletteItem::new("quit", vec!["exit"], Command::Quit));
 
-        // Write actions — hidden entirely in read-only mode.
+        // Write actions; hidden in read-only mode.
         if !self.read_only() {
             if self.queue_name.is_some() {
                 items.push(PaletteItem::new(
@@ -2676,10 +2662,8 @@ pub async fn run(terminal: &mut DefaultTerminal, client: BullClient, args: Args)
         let elapsed = now.duration_since(last_frame);
         last_frame = now;
 
-        // Advance the wall clock once per frame so live countdowns / elapsed
-        // times tick smoothly between data fetches. Tests drive `ui::draw`
-        // directly (never this loop), so their `now` stays fixed — determinism
-        // holds.
+        // Advance the clock each frame for live countdowns and elapsed times.
+        // Tests drive `ui::draw` directly, so their `now` stays fixed.
         app.now = crate::format::now_ms();
 
         terminal.draw(|frame| {
@@ -2883,10 +2867,10 @@ mod tests {
         // Within bounds: moves by delta.
         assert_eq!(clamp_scroll(0, 1, 10), 1);
         assert_eq!(clamp_scroll(5, 3, 10), 8);
-        // Clamps at the bottom — a page past the end lands exactly on max.
+        // Clamps at the bottom - a page past the end lands exactly on max.
         assert_eq!(clamp_scroll(9, 50, 10), 10, "can't scroll into the void");
         assert_eq!(clamp_scroll(10, 1, 10), 10, "already at the bottom");
-        // Clamps at the top — no negative offset.
+        // Clamps at the top - no negative offset.
         assert_eq!(clamp_scroll(2, -50, 10), 0);
         assert_eq!(clamp_scroll(0, -1, 10), 0);
         // A zero max (content fits) pins to the top: scrolling is a no-op.

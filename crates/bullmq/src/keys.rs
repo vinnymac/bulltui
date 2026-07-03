@@ -1,8 +1,7 @@
 //! Redis key construction for BullMQ queues.
 //!
-//! BullMQ namespaces every key as `{prefix}:{queueName}:{suffix}`. The default
-//! prefix is `bull`. This mirrors `Queue.toKey` / the `keys` map in the bullmq
-//! source (see `dist/cjs/classes/queue-keys.js`).
+//! BullMQ namespaces every key as `{prefix}:{queueName}:{suffix}`.
+//! The default prefix is `bull`.
 
 use crate::types::JobState;
 
@@ -32,7 +31,7 @@ impl KeyBuilder {
         &self.prefix
     }
 
-    /// `{prefix}:{name}:` — the base used by `getCounts`/`getRanges` (KEYS[1]).
+    /// `{prefix}:{name}:` - the base key prefix used as KEYS[1] in count/range commands.
     pub fn base(&self) -> String {
         format!("{}:{}:", self.prefix, self.name)
     }

@@ -4,12 +4,12 @@ use clap::Parser;
 
 pub use crate::clipboard::ClipboardMode;
 
-/// bulltui — a terminal UI for BullMQ (feature parity with bull-board).
+/// bulltui: a terminal UI for BullMQ with feature parity with bull-board.
 #[derive(Debug, Clone, Parser)]
 #[command(name = "bulltui", version, about, long_about = None)]
 pub struct Args {
-    /// Redis/Valkey connection URL. Use `rediss://` to connect over TLS (for
-    /// managed brokers — ElastiCache, Upstash, Redis Cloud, Azure, …).
+    /// Redis/Valkey connection URL. Use `rediss://` for TLS (managed brokers:
+    /// ElastiCache, Upstash, Redis Cloud, Azure).
     #[arg(
         short,
         long,
@@ -43,10 +43,9 @@ pub struct Args {
     #[arg(long)]
     pub no_confirm: bool,
 
-    /// Skip TLS certificate verification for `rediss://` connections. Insecure
-    /// (exposes the connection to man-in-the-middle) — only for self-signed or
-    /// private-CA brokers on a trusted network. Errors on a plaintext `redis://`
-    /// URL rather than silently doing nothing.
+    /// Skip TLS certificate verification for `rediss://` connections. Exposes
+    /// the connection to MITM; use only on trusted networks with self-signed or
+    /// private-CA certs. Errors on a plaintext `redis://` URL.
     #[arg(long)]
     pub insecure: bool,
 
@@ -55,24 +54,20 @@ pub struct Args {
     #[arg(long, value_enum, default_value = "auto")]
     pub clipboard: ClipboardMode,
 
-    /// Disable mouse navigation at launch. Mouse capture is **on by default**
-    /// (the prevailing TUI posture — htop, lazygit, zellij, neovim): click a row
-    /// to select, click it again to open; the wheel scrolls. While captured, hold
-    /// `Shift` (or `⌥`/Option on macOS terminals) and drag to select text
-    /// natively, or press `Ctrl+O` to drop capture entirely; `y` copies the
-    /// focused pane straight to your clipboard (OSC 52 over SSH/tmux) regardless.
-    /// Pass `--no-mouse` to start with capture off. The keyboard always works.
+    /// Start with mouse capture disabled. Capture is on by default (click to
+    /// select; click again to open; wheel scrolls). While captured, `Shift`/`⌥`
+    /// drag does native text selection; `Ctrl+O` drops capture; `y` copies via
+    /// OSC 52 regardless of capture state.
     #[arg(long)]
     pub no_mouse: bool,
 
-    /// Skip the `BULLTUI` startup splash. A slow/TLS broker still shows a
-    /// "connecting" screen (so the terminal never just freezes), but a fast
-    /// local connect goes straight to the queues with no brand beat.
+    /// Skip the `BULLTUI` startup splash. A slow or TLS broker still shows
+    /// the connecting screen; a fast local connect goes straight to the queues.
     #[arg(long)]
     pub no_splash: bool,
 
-    /// Preview the startup splash and hold it on screen (no connection). Powers
-    /// the wordmark on, then waits — press any key to exit. Handy for tuning it.
+    /// Preview the startup splash and hold it on screen (no connection).
+    /// Press any key to exit.
     #[arg(long)]
     pub splash_preview: bool,
 

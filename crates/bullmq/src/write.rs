@@ -1,10 +1,8 @@
-//! Admin write operations (pause/resume, retry, promote, clean, remove, add…).
+//! Admin write operations (pause/resume, retry, promote, clean, remove, add).
 //!
-//! Each operation reproduces the observable effect of the corresponding bullmq
-//! Lua command script (`dist/cjs/commands/*.lua`) — including the events stream
-//! and the ZSET "marker" that workers `BZPOPMIN` on, so that re-queued, added
-//! and promoted jobs are actually picked up by real bullmq workers. This is
-//! verified behaviourally in the e2e write tests.
+//! Each operation reproduces the observable BullMQ effect, including the events
+//! stream and the ZSET marker that workers `BZPOPMIN` on. Verified behaviourally
+//! in the e2e write tests.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -30,7 +28,7 @@ fn now_ms() -> i64 {
 impl BullClient {
     // -- queue: pause / resume ---------------------------------------------
 
-    /// Pause a queue (`pause-7.lua`, paused branch).
+    /// Pause a queue.
     pub async fn pause(&self, queue: &str) -> Result<()> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -58,7 +56,7 @@ impl BullClient {
         Ok(())
     }
 
-    /// Resume a queue (`pause-7.lua`, resumed branch).
+    /// Resume a queue.
     pub async fn resume(&self, queue: &str) -> Result<()> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -118,9 +116,9 @@ impl BullClient {
 
     // -- queue: empty / obliterate -----------------------------------------
 
-    /// Empty a queue (bull-board `empty` → `queue.drain()`): removes waiting,
-    /// paused and prioritized jobs and their data, leaving active, delayed,
-    /// completed and failed untouched. Returns the number of jobs removed.
+    /// Empty a queue: removes waiting, paused, and prioritized jobs and their
+    /// data, leaving active, delayed, completed, and failed untouched.
+    /// Returns the number of jobs removed.
     pub async fn empty(&self, queue: &str) -> Result<u64> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -173,8 +171,8 @@ impl BullClient {
         Ok(ids.len() as u64)
     }
 
-    /// Obliterate a queue (`obliterate-2.lua`, force = false): destroys all of
-    /// its keys. Refuses if the queue is not paused or has active jobs.
+    /// Obliterate a queue: destroys all of its keys.
+    /// Refuses if the queue is not paused or has active jobs.
     pub async fn obliterate(&self, queue: &str) -> Result<()> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -219,12 +217,9 @@ impl BullClient {
             self.delete_job_keys(&kb, id).await?;
         }
 
-        // Job schedulers: bullmq's obliterate-2.lua removes each per-scheduler
-        // metadata hash (`repeat:{id}`) in a loop; the `repeat` ZSET below is
-        // only the index, so deleting it alone would orphan those hashes. Gather
-        // the scheduler ids and delete their hashes explicitly. (There is no
-        // `{prefix}:{q}:jobschedulers` key — that name is merely a comment alias
-        // for `repeat` in bullmq, so we never DEL it.)
+        // The `repeat` ZSET is only the index; each scheduler also has a
+        // `repeat:{id}` metadata hash. Delete the hashes explicitly to avoid
+        // orphans. (There is no separate `jobschedulers` key - `repeat` is it.)
         let scheduler_ids: Vec<String> = redis::cmd("ZRANGE")
             .arg(kb.repeat())
             .arg(0)
@@ -265,7 +260,6 @@ impl BullClient {
 
     /// Clean jobs from a state older than `grace_ms` (bull-board uses 5000ms),
     /// up to `limit` (0 = unlimited). Returns the removed job ids.
-    /// Mirrors `cleanJobsInSet-3.lua`.
     pub async fn clean(
         &self,
         queue: &str,
@@ -362,8 +356,7 @@ impl BullClient {
 
     // -- job: retry ---------------------------------------------------------
 
-    /// Retry a single failed or completed job (`reprocessJob-8.lua` via
-    /// `Job.retry`). Determines the current state automatically.
+    /// Retry a single failed or completed job. Determines the current state automatically.
     pub async fn retry_job(&self, queue: &str, id: &str) -> Result<()> {
         let mut conn = self.conn();
         let kb = self.keys(queue);
@@ -522,7 +515,7 @@ impl BullClient {
 
     // -- job: promote -------------------------------------------------------
 
-    /// Promote a delayed job to waiting (`promote-9.lua`).
+    /// Promote a delayed job to waiting.
     pub async fn promote_job(&self, queue: &str, id: &str) -> Result<()> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -612,8 +605,8 @@ impl BullClient {
 
     // -- job: remove / clean -----------------------------------------------
 
-    /// Remove a job and all of its data (`removeJob-2.lua`). Refuses if the job
-    /// is active/locked. Removes children recursively (bull-board default).
+    /// Remove a job and all of its data. Refuses if the job is active/locked.
+    /// Removes children recursively.
     pub async fn remove_job(&self, queue: &str, id: &str) -> Result<()> {
         self.remove_job_inner(queue, id, true, 0).await
     }
@@ -692,7 +685,7 @@ impl BullClient {
         }
     }
 
-    /// Remove a job scheduler and its next scheduled job (`removeJobScheduler-3.lua`).
+    /// Remove a job scheduler and its next scheduled job.
     /// Returns true if the scheduler existed.
     pub async fn remove_job_scheduler(&self, queue: &str, scheduler_id: &str) -> Result<bool> {
         let kb = self.keys(queue);
@@ -746,10 +739,9 @@ impl BullClient {
 
     // -- job: add / update --------------------------------------------------
 
-    /// Add a job to the queue, routing to delayed / prioritized / wait as
-    /// appropriate (`addStandardJob` / `addDelayedJob` / `addPrioritizedJob`).
-    /// `opts` is a JSON object using bull-board's option names (e.g.
-    /// `delay`, `priority`, `attempts`, `lifo`, `jobId`, `failParentOnFailure`).
+    /// Add a job to the queue, routing to delayed, prioritized, or wait as
+    /// appropriate. `opts` is a JSON object with BullMQ option names
+    /// (`delay`, `priority`, `attempts`, `lifo`, `jobId`, `failParentOnFailure`).
     /// Returns the new job id.
     pub async fn add_job(
         &self,
@@ -874,7 +866,7 @@ impl BullClient {
         self.add_job(queue, &job.name, &data, &opts).await
     }
 
-    /// Update a job's data (`updateData-1.lua`).
+    /// Update a job's `data` field.
     pub async fn update_job_data(&self, queue: &str, id: &str, data: &Value) -> Result<()> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -898,7 +890,7 @@ impl BullClient {
         Ok(())
     }
 
-    /// Change the delay of a delayed job (`changeDelay-4.lua`).
+    /// Change the delay of a delayed job.
     pub async fn change_delay(&self, queue: &str, id: &str, delay_ms: i64) -> Result<()> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -939,9 +931,9 @@ impl BullClient {
         Ok(())
     }
 
-    /// Change a waiting/prioritized job's priority (`changePriority-7.lua`).
-    /// Removes it from wherever it currently waits and re-adds it: priority 0
-    /// goes to the wait (or paused) list, otherwise into the prioritized ZSET.
+    /// Change a waiting or prioritized job's priority. Removes the job from its
+    /// current list/set and re-inserts: priority 0 goes to wait/paused,
+    /// otherwise into the prioritized ZSET.
     pub async fn change_priority(
         &self,
         queue: &str,
@@ -1051,8 +1043,7 @@ impl BullClient {
 
     // -- internal helpers ---------------------------------------------------
 
-    /// `getTargetQueueList`: returns the target list key and whether the queue
-    /// is paused or at max concurrency.
+    /// Returns the target list key and whether the queue is paused or at max concurrency.
     async fn target_queue_list(&self, kb: &KeyBuilder) -> Result<(String, bool)> {
         let mut conn = self.conn();
         let attrs: Vec<Option<String>> = redis::cmd("HMGET")
@@ -1142,7 +1133,7 @@ impl BullClient {
         Ok(())
     }
 
-    /// `getDelayedScore`: bakes ordering into the score. Returns `(score, ts)`.
+    /// Bakes ordering into the delayed ZSET score. Returns `(score, ts)`.
     async fn delayed_score(
         &self,
         kb: &KeyBuilder,
@@ -1180,7 +1171,7 @@ impl BullClient {
         Ok((score, delayed_ts))
     }
 
-    /// `addDelayMarkerIfNeeded`: set the delay marker to the next delayed ts.
+    /// Set the delay marker to the next delayed job's epoch ms, if any.
     async fn add_delay_marker_if_needed(&self, kb: &KeyBuilder) -> Result<()> {
         let mut conn = self.conn();
         let res: Vec<RedisValue> = redis::cmd("ZRANGE")

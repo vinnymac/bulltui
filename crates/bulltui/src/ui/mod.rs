@@ -74,10 +74,9 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     // box's top-border title; the breadcrumb and poll cadence sit on the inner
     // row.
     //
-    // Connection LED: a filled green dot (pulsed by the animation pass while
-    // connected) or a hollow red dot when Redis is unreachable. The dot is the
-    // *only* cell coloured `theme::LIVE`, which is how the heartbeat targets it
-    // and nothing else. Just colour + a dot — no text.
+    // Connection LED: green dot (pulsed when connected) or hollow red when
+    // unreachable. The only cell colored `theme::LIVE`; that uniqueness is what
+    // lets the pulse effect target exactly this cell.
     let (dot, dot_color) = if app.connected {
         ("●", theme::LIVE)
     } else {
@@ -154,11 +153,8 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         right.push(Span::styled("[read-only]", theme::muted().fg(theme::WARN)));
         right.push(Span::raw("  "));
     }
-    // Mouse capture is on by default, which suspends the terminal's native
-    // text selection — so surface the escape hatch right here (best-practice
-    // discoverable hint) rather than leaving it buried in `?` help. When capture
-    // is off we flag that instead, since off is the non-default mode: the switch
-    // is never silent in either direction.
+    // Surface the native-selection escape hatch here (capture suspends it).
+    // When capture is off, flag that too; the non-default state is always visible.
     if app.mouse_capture {
         right.push(Span::styled("⇧/⌥-drag: select", theme::muted()));
     } else {

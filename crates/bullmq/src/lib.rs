@@ -1,13 +1,8 @@
 //! A direct-to-Redis client for [BullMQ](https://docs.bullmq.io/) queues.
 //!
-//! `bulltui` talks to Redis/Valkey directly rather than through the Node.js
-//! `bullmq` library. This crate implements the parts of BullMQ's data model and
-//! operations that a dashboard needs — reads (counts, job listings, logs,
-//! metrics, flows) and admin writes (pause/resume, retry, promote, clean,
-//! remove, add, …) — matching bullmq v5 semantics as closely as possible.
-//!
-//! The correctness reference is the bullmq source itself: the Lua command
-//! scripts (`dist/cjs/commands/*.lua`) and the `Queue`/`Job` classes.
+//! Implements the read and admin-write operations a dashboard needs: counts,
+//! job listings, logs, metrics, flows, pause/resume, retry, promote, clean,
+//! remove, and add. Semantics match BullMQ v5.
 
 mod client;
 mod error;

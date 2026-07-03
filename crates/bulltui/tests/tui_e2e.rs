@@ -87,7 +87,7 @@ async fn type_str(app: &mut App, s: &str) {
     }
 }
 
-/// Inject a synthetic left-click at `(col, row)` — the mouse analogue of
+/// Inject a synthetic left-click at `(col, row)` - the mouse analogue of
 /// `press`. Hit-testing reads the regions recorded by the previous `render`, so
 /// callers render first (exactly as the run loop draws before reading events).
 async fn click(app: &mut App, col: u16, row: u16) {
@@ -240,7 +240,7 @@ async fn job_detail_body_scrolls_within_bounds_with_a_scrollbar() {
     let (_c, mut app) = seeded_app().await;
 
     // emails has permanently-failed `fail` jobs (attempts: 1) whose worker throws
-    // `boom for <id>` — a real multi-line Node stacktrace on the Error tab.
+    // `boom for <id>` - a real multi-line Node stacktrace on the Error tab.
     press(&mut app, KeyCode::Enter).await; // open emails (sorts first)
     assert_eq!(app.queue_name.as_deref(), Some("emails"));
     tab_to(&mut app, JobState::Failed).await;
@@ -259,7 +259,7 @@ async fn job_detail_body_scrolls_within_bounds_with_a_scrollbar() {
     );
     assert_eq!(app.detail_scroll, 0, "opens at the top");
 
-    // Hammering Down past the end clamps to the last line — never into the void.
+    // Hammering Down past the end clamps to the last line; it never scrolls past max.
     for _ in 0..100 {
         press(&mut app, KeyCode::Down).await;
     }
@@ -279,8 +279,8 @@ async fn job_detail_body_scrolls_within_bounds_with_a_scrollbar() {
         "PageUp steps back up from the bottom"
     );
 
-    // A scrollbar thumb (█) is drawn on the right border when content overflows —
-    // and only then; the Error tab has no other █ glyph.
+    // A scrollbar thumb (█) is drawn on the right border when content overflows;
+    // the Error tab has no other █ glyph.
     let text = render(&mut app, 100, 14);
     assert!(
         text.contains('█'),
@@ -580,8 +580,8 @@ async fn event_stream_task_delivers_live() {
         .expect("a batch");
     assert!(!first.is_empty(), "backfill delivered");
 
-    // Produce a live event; `pause` XADDs a `paused` event to the stream. The
-    // dedicated blocking XREAD must deliver it (the ADR-0001 risk path).
+    // Produce a live event; `pause` XADDs a `paused` event to the stream.
+    // The dedicated blocking XREAD must deliver it.
     app.client.pause("emails").await.unwrap();
     let mut saw_paused = false;
     for _ in 0..5 {
@@ -660,9 +660,9 @@ async fn mouse_click_opens_a_job_row() {
         .find(|r| r.kind == HitKind::Job)
         .expect("queue registers a clickable job region");
 
-    // Row 0 is the default selection, so a single click on it opens the job —
-    // this also exercises the bordered-table geometry (data rows start one row
-    // below the in-block header).
+    // Row 0 is the default selection; a single click on it opens the job.
+    // Also exercises the bordered-table geometry (data rows start one row below
+    // the in-block header).
     click(&mut app, region.area.x + 1, region.area.y).await;
     assert_eq!(
         app.screen,

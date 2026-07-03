@@ -1,18 +1,14 @@
-//! Animated startup: the terminal is initialised *first*, then the connection
-//! runs as a background task while a splash (and, if the broker is slow to
-//! answer, a "connecting" screen) plays — so a distant or TLS broker shows life
-//! instead of a frozen terminal during the handshake.
+//! Animated startup: the terminal initialises first, then the connection runs
+//! as a background task while a splash plays. A slow or TLS broker therefore
+//! shows a "connecting" screen instead of a frozen terminal.
 //!
-//! Flow: every launch gets a brief `BULLTUI` wordmark splash ([`SPLASH_MIN`],
-//! skippable, or off entirely with `--no-splash`) that overlaps the connect +
-//! first fetch, so it costs almost no added latency. If the connection is still
-//! pending once the splash has had its moment, it hands off to an orbiting-comet
-//! "connecting" card until the socket answers (or the user cancels). Only then
-//! does [`crate::app::run`] take over.
+//! Every launch gets a brief `BULLTUI` wordmark splash ([`SPLASH_MIN`],
+//! skippable via any key, or off entirely with `--no-splash`) that overlaps the
+//! connect, so it adds no latency. If still pending after the splash, a
+//! connecting card runs until the socket answers or the user cancels.
 //!
-//! Like the rest of the UI the renderers here are pure; the tachyonfx effects
-//! are advanced only by this real loop (never in tests), so the splash/connect
-//! renderers can still be exercised deterministically with `TestBackend`.
+//! Renderers here are pure; effects are advanced only by the boot loop (never
+//! in tests), so splash/connect renderers stay deterministic with `TestBackend`.
 
 use std::time::{Duration, Instant};
 
@@ -30,24 +26,20 @@ use tachyonfx::{fx, Duration as FxDuration, Effect, Interpolation};
 use crate::cli::Args;
 use crate::theme;
 
-/// The `BULLTUI` wordmark, pre-rendered from Google's **Doto** (a dot-matrix
-/// face) with each lit dot as a `●` glyph — a crisp LED-panel look that suits a
-/// TUI and powers on via [`crate::fx::splash_reveal`].
+/// The `BULLTUI` wordmark, rendered from the Doto dot-matrix typeface with `●`
+/// glyphs. Revealed by [`crate::fx::splash_reveal`].
 const WORDMARK: &str = include_str!("splash_bulltui.txt");
 
-/// How long the splash lingers before, if still unconnected, handing off to the
-/// connecting screen. A fast (local) connect overlaps this entirely, so it's a
-/// brand beat rather than dead time. Any key skips it.
+/// How long the splash holds before handing off to the connecting screen.
+/// A fast local connect overlaps this entirely. Any key skips it.
 const SPLASH_MIN: Duration = Duration::from_millis(3500);
 
-/// How long the wordmark takes to power on. Kept short — a quick warm-up from
-/// the dim glow to full cyan — so the living shimmer that follows dominates the
-/// hold rather than arriving just as the splash ends.
+/// Wordmark reveal duration. Short so the shimmer phase has time to run before
+/// the splash hands off.
 const REVEAL: (u32, Interpolation) = (700, Interpolation::QuadOut);
 
-/// With `--no-splash`, the grace before the connecting screen appears — long
-/// enough that a fast local connect flashes nothing at all, short enough that a
-/// stalled broker still shows life quickly.
+/// With `--no-splash`, the grace window before the connecting screen appears.
+/// Fast local connects complete within this window and show nothing.
 const GRACE: Duration = Duration::from_millis(150);
 
 /// Braille throbber frames, cycled by elapsed time on the connecting card.
@@ -79,9 +71,8 @@ pub async fn splash_and_connect(
         BullClient::connect_with(&url, prefix, ConnectOptions { insecure }).await
     });
 
-    // A one-shot power-on: the wordmark sweeps in from the void, then holds (a
-    // completed effect is a no-op, and the renderer paints the settled colour
-    // each frame).
+    // One-shot reveal: the wordmark fades in, then holds (completed effect is a
+    // no-op; the renderer paints the settled colour each frame).
     let mut splash_fx = crate::fx::splash_reveal(REVEAL);
     // Lazily armed when we cross into the connecting phase.
     let mut orbit_fx: Option<Effect> = None;
@@ -132,7 +123,7 @@ pub async fn splash_and_connect(
                 let rect = render_splash(frame);
                 splash_fx.process(fx_dur, frame.buffer_mut(), rect);
             }
-            // else: `--no-splash` grace window — a blank frame until the connect
+            // else: `--no-splash` grace window; blank frame until connect
             // resolves or the connecting card takes over.
         })?;
 
@@ -163,9 +154,8 @@ pub async fn splash_and_connect(
     }
 }
 
-/// Play the splash and then **hold it on screen** until any key is pressed —
-/// no connection, no timeout, no hand-off. A dev aid for eyeballing the splash
-/// (`--splash-preview`).
+/// Hold the splash on screen until any key is pressed.
+/// No connection, no timeout. Used by `--splash-preview`.
 pub async fn preview_splash(terminal: &mut DefaultTerminal) -> Result<()> {
     let mut splash_fx = crate::fx::splash_reveal(REVEAL);
     let mut events = EventStream::new();
@@ -374,7 +364,7 @@ mod tests {
             .find(|c| c.symbol() == "●")
             .expect("a lit dot was drawn");
         match dot.fg {
-            // A teal/cyan warm-up has real green+blue — never a harsh near-black.
+            // A teal/cyan warm-up has real green+blue; not a near-black.
             Color::Rgb(_, g, b) => assert!(
                 g as u16 + b as u16 > 80,
                 "dots warm up in teal/cyan, not from black: {:?}",

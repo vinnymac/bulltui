@@ -1,17 +1,12 @@
 //! System clipboard integration with two backends:
 //!
-//! - **native** ([`arboard`]) — talks to the OS clipboard. Confirms success,
-//!   but over SSH it would target the *remote* machine's clipboard (or fail),
-//!   which is useless to the person at the keyboard.
-//! - **OSC 52** — an escape sequence the terminal itself interprets and copies
-//!   to *your* clipboard. This is what makes copy work over SSH and through
-//!   tmux. It is fire-and-forget: the terminal gives no acknowledgement, so a
-//!   successful write means "sent to the terminal", not "the terminal copied".
+//! - **native** ([`arboard`]): talks to the OS clipboard. Over SSH this targets
+//!   the remote machine's clipboard, not the local one.
+//! - **OSC 52**: an escape sequence the terminal interprets locally, so copy
+//!   works over SSH and tmux. Write-only; the terminal sends no acknowledgement.
 //!
-//! [`ClipboardMode::Auto`] prefers OSC 52 inside an SSH session and the native
-//! backend otherwise (falling back to OSC 52 if the native backend errors).
-//! The chosen [`Method`] is returned so the caller can report it — we never
-//! switch backends silently.
+//! [`ClipboardMode::Auto`] prefers OSC 52 in SSH sessions and the native backend
+//! otherwise, with OSC 52 as a fallback. The [`Method`] used is always returned.
 
 use std::io::Write;
 
@@ -52,9 +47,8 @@ pub fn copy(text: &str, mode: ClipboardMode) -> Result<Method, String> {
             if in_ssh() {
                 copy_osc52(text).map(|()| Method::Osc52)
             } else {
-                // Local: prefer the confirmable native backend; if it isn't
-                // available (e.g. headless Linux), fall back to OSC 52 — the
-                // returned Method tells the caller which path ran.
+                // Local: prefer native; fall back to OSC 52 if unavailable
+                // (e.g. headless Linux). Returned Method identifies the path.
                 match copy_native(text) {
                     Ok(()) => Ok(Method::Native),
                     Err(_) => copy_osc52(text).map(|()| Method::Osc52),

@@ -1,5 +1,5 @@
 //! End-to-end write tests. Verifies admin operations both by reading state
-//! back with the (separately verified) Rust client AND behaviourally — real
+//! back with the (separately verified) Rust client AND behaviourally: real
 //! bullmq workers must actually process jobs that the Rust client adds,
 //! retries and promotes, which proves the wait-list/marker/event mechanics.
 

@@ -1,19 +1,11 @@
-//! tachyonfx-powered animations, tuned to stay subtle and *intentional*.
+//! tachyonfx animation effects: border draw-in, content fades, connection
+//! pulse, and the splash shimmer.
 //!
-//! The signature flourish is the **bootup border draw-in**: a bright comet
-//! travels clockwise around each box's border ring, drawing the frame onto the
-//! screen one edge at a time (see [`border_draw_in`]). Beyond that the kit is
-//! restrained — a pulsing connection LED, soft content fades when navigating,
-//! and a gentle inner shimmer when a live poll changes the data.
-//!
-//! Design: [`Animations`] is owned by [`crate::app::App`] but is *only ever
-//! advanced by the real run loop* (`App::render_effects`). The renderers in
-//! [`crate::ui`] stay pure, so `TestBackend`-driven tests observe a static,
-//! deterministic frame. Triggers (`intro`, `transition`, `live_update`, …)
-//! merely enqueue effects and never read the clock, so they are harmless when
-//! invoked from tests. The one custom effect ([`border_draw_in`]) is driven by
-//! its `EffectTimer` alpha (advanced by the per-frame `Duration` the run loop
-//! feeds in), never by wall-clock time, so it too stays deterministic.
+//! [`Animations`] is owned by [`crate::app::App`] but advanced only by the
+//! run loop (`App::render_effects`). Triggers enqueue effects without reading
+//! the clock, so they are safe to call from tests. Custom effects are driven
+//! by `EffectTimer` alpha, never wall-clock time, keeping `TestBackend` output
+//! deterministic.
 
 use ratatui::layout::{Margin, Rect};
 use ratatui::style::Color;
@@ -22,16 +14,15 @@ use tachyonfx::{fx, CellFilter, Duration as FxDuration, Effect, Interpolation};
 
 use crate::theme;
 
-/// Colour that not-yet-revealed cells fade from — a near-black that disappears
-/// into a dark terminal, so reveals read as content emerging rather than as a
-/// flash of colour.
+/// Near-black start colour for reveals; disappears into a dark terminal
+/// background so the fade reads as content appearing, not a colour flash.
 const VOID: Color = Color::Rgb(0x0A, 0x0A, 0x0A);
 
 /// The settled colour of a drawn border ring. Kept close to `theme::BORDER_FOCUS`
 /// (cyan) so the hand-off to the statically-rendered border is seamless when the
 /// draw-in completes.
 const RING: (u8, u8, u8) = (0x1E, 0xC4, 0xD6);
-/// The bright crest of the travelling comet — a near-white cyan.
+/// The bright crest of the travelling comet; near-white cyan.
 const COMET: (u8, u8, u8) = (0xE4, 0xFF, 0xFF);
 /// How many cells the comet's glowing tail spans.
 const TRAIL: f32 = 10.0;
@@ -63,15 +54,12 @@ impl Default for Animations {
 
 impl Animations {
     pub fn new() -> Self {
-        // A slow breathing pulse on the connection dot. The dot is re-rendered
-        // in its base colour ([`theme::LIVE`]) every frame, so fading the
-        // foreground toward a dimmer green and back — ping-pong, forever —
-        // reads as a gentle heartbeat.
+        // Slow ping-pong fade on the connection dot: LIVE -> LIVE_DIM -> LIVE.
         //
-        // The filter is attached to the *inner* `fade_to_fg`, not the outer
-        // `repeating`/`ping_pong` wrappers: `PingPong` stores a filter handed to
-        // it but never applies it to the wrapped effect, so a filter on the
-        // outer effect would silently leak the fade across the whole header row.
+        // Filter is attached to the *inner* `fade_to_fg`, not to the outer
+        // `repeating`/`ping_pong` wrappers. `PingPong` stores a filter but never
+        // applies it to the wrapped effect, so an outer filter leaks the fade
+        // across the whole header row.
         let pulse = fx::repeating(fx::ping_pong(
             fx::fade_to_fg(theme::LIVE_DIM, (1100, Interpolation::SineInOut))
                 .with_filter(CellFilter::FgColor(theme::LIVE)),
@@ -88,8 +76,7 @@ impl Animations {
     /// Startup reveal: each box's border ring draws itself in clockwise while
     /// its inner content fades up just behind the arriving frame.
     pub fn intro(&mut self) {
-        // The header is smaller, so it draws in a touch quicker — the eye lands
-        // on the title, then the stage opens beneath it.
+        // Header is smaller so it draws in slightly faster.
         self.fx.push((
             Zone::Header,
             border_draw_in((720, Interpolation::QuadInOut)),
@@ -140,9 +127,8 @@ impl Animations {
 
     // -- frame loop --------------------------------------------------------
 
-    /// The redraw cadence the run loop should use: fast while transient effects
-    /// play, gentle for the ambient heartbeat, and idle (`None`) when nothing
-    /// is animating so a quiescent, disconnected UI costs nothing.
+    /// Redraw cadence: fast (~30 fps) while transient effects play, slow (~10
+    /// fps) for the connection pulse, and `None` when nothing is animating.
     pub fn frame_budget(&self, connected: bool) -> Option<std::time::Duration> {
         if !self.fx.is_empty() {
             Some(std::time::Duration::from_millis(33))
@@ -169,61 +155,49 @@ impl Animations {
             e.running()
         });
 
-        // The heartbeat only beats while we're actually connected; otherwise
-        // the static red dot from `ui::draw_header` is left untouched. The
-        // FgColor filter confines it to the single LED cell in the header.
+        // Pulse only while connected; otherwise the static red dot is left
+        // untouched. The FgColor filter confines it to the single LED cell.
         if connected {
             self.pulse.process(dur, buf, header);
         }
     }
 }
 
-/// The shimmer's centre colour as HSL (degrees, %, %), chosen so that at *zero*
-/// wave amplitude [`hsl_to_rgb`] returns exactly `theme::SPLASH_DOT` — so the
-/// living wave blooms out of the settled cyan with no colour jump when the
-/// power-on fade hands over.
+/// The shimmer's centre colour as HSL (degrees, %, %). At zero amplitude,
+/// `hsl_to_rgb` returns exactly `theme::SPLASH_DOT`, so the shimmer begins with
+/// no colour jump when the reveal fade hands over.
 const SHIMMER_CENTER: (f32, f32, f32) = (186.36, 75.12, 60.59);
 
 /// One full drift of the shimmer wave. The bloom and the steady loop share this
 /// cycle, so the wave's *pace* never changes across the hand-off either.
 const SHIMMER_CYCLE: (u32, Interpolation) = (2000, Interpolation::Linear);
 
-/// The boot splash's reveal: the `BULLTUI` dot-matrix wordmark **powers on**,
-/// its dots warming up from a dim glow to full cyan — a *foreground-only* fade
-/// (so no black backdrop is ever painted) — then the living [`shimmer`] **blooms
-/// out of** that settled cyan and drifts forever, so the sign never freezes.
+/// Boot splash reveal: foreground-only fade from `SPLASH_DOT_DIM` to
+/// `SPLASH_DOT`, then a seamless hand-off to the repeating [`shimmer`].
 ///
-/// The hand-off is seamless *by construction* — no colour or motion "pop":
+/// The hand-off is colour- and motion-continuous by construction:
 /// - the fade lands on exactly [`SHIMMER_CENTER`] (= `theme::SPLASH_DOT`);
-/// - the bloom opens at *zero* amplitude (so its first frame **is** that colour)
-///   and eases the amplitude up while already drifting at the loop's pace;
-/// - the bloom advances exactly one full turn, so its last frame matches the
-///   repeating loop's first frame in both colour *and* motion.
+/// - the bloom opens at zero amplitude and eases up over ~20% of one cycle;
+/// - the bloom advances one full turn, matching the repeating loop's first frame.
 ///
-/// Owned and processed by [`crate::boot`] over the wordmark's own rect, so it's a
-/// standalone effect, not an `Animations` trigger.
+/// Standalone effect processed by [`crate::boot`] over the wordmark rect.
 pub(crate) fn splash_reveal<T: Into<tachyonfx::EffectTimer>>(timer: T) -> Effect {
     fx::sequence(&[
         fx::fade_from_fg(theme::SPLASH_DOT_DIM, timer),
-        // Bloom: amplitude eased 0→full over the first ~20% of a cycle (~400ms
-        // — quick but soft), drifting at the loop's own pace, so the shimmer is
-        // clearly alive well before the splash hands off.
+        // Bloom: amplitude eased 0->full over the first ~20% of a cycle (~400ms),
+        // drifting at the steady loop's pace so the shimmer is alive before hand-off.
         shimmer(SHIMMER_CYCLE, |a| smoothstep((a / 0.2).min(1.0))),
         // Steady state: the same wave at full amplitude, looping forever.
         fx::repeating(shimmer(SHIMMER_CYCLE, |_| 1.0)),
     ])
 }
 
-/// The splash's living shimmer: a wave of **hue *and* brightness** that flows
-/// across the dots, so different dots glow different cool colours (cyan → green →
-/// blue → violet) at once and the whole pattern drifts sideways. `envelope` maps
-/// the timer `alpha` to the wave's amplitude (`0` = the flat [`SHIMMER_CENTER`]
-/// cyan, `1` = full swing), which lets the reveal bloom the wave in from nothing
-/// and then hold it steady. A per-cell shader over the wordmark rect — only `●`
-/// dot cells are painted, empty cells are left alone. Under [`fx::repeating`] the
-/// loop is seamless: the spatial phase advances exactly one full turn per cycle,
-/// and the pace comes from the timer `alpha` (never the wall clock), so it stays
-/// deterministic.
+/// Hue and brightness wave across the splash dots. `envelope` maps the timer
+/// `alpha` to the wave amplitude (`0` = flat [`SHIMMER_CENTER`], `1` = full
+/// swing), letting the caller bloom in the wave from nothing then hold it steady.
+/// Only `●` cells are painted; empty cells are skipped. Under [`fx::repeating`]
+/// the spatial phase advances one full turn per cycle, keeping the loop seamless.
+/// Pace is driven by timer alpha, never wall-clock, so it stays deterministic.
 fn shimmer<T, E>(timer: T, envelope: E) -> Effect
 where
     T: Into<tachyonfx::EffectTimer>,
@@ -249,8 +223,8 @@ where
                 let row = (y - area.y) as f32;
                 let phase = col * 0.20 + row * 0.55 - t * TAU;
                 let hue = base_h + amp * 58.0 * phase.sin();
-                // Brightness rides a *different* phase so colour and glow don't
-                // pulse in lockstep — a richer, less mechanical shimmer.
+                // Brightness uses a different phase offset so hue and brightness
+                // don't pulse in lockstep.
                 let light = base_l + amp * 18.0 * (phase + 1.3).sin();
                 cell.set_fg(hsl_to_rgb(hue, base_s, light));
             }
@@ -297,11 +271,10 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color {
     Color::Rgb(channel(h + 1.0 / 3.0), channel(h), channel(h - 1.0 / 3.0))
 }
 
-/// A never-ending comet **orbiting** a box's border ring — the connecting
-/// spinner. Unlike [`border_draw_in`], the ring stays settled the whole way
-/// round (only the moving comet + its trailing glow are painted), and the trail
-/// wraps around the corner so the loop is seamless. Wrap in [`fx::repeating`] for
-/// a continuous orbit; [`crate::boot`] processes it over the body box.
+/// Comet orbiting a box's border ring - the connecting spinner. Unlike
+/// [`border_draw_in`], the ring stays settled; only the comet and its trail are
+/// painted, wrapping across corners. Wrap in [`fx::repeating`] for a continuous
+/// orbit.
 pub(crate) fn orbit<T: Into<tachyonfx::EffectTimer>>(timer: T) -> Effect {
     fx::effect_fn_buf((), timer, move |_state, ctx, buf| {
         let ring = ring_positions(ctx.area);
@@ -345,9 +318,8 @@ fn border_draw_in<T: Into<tachyonfx::EffectTimer>>(timer: T) -> Effect {
         if n == 0 {
             return;
         }
-        // Let the comet head travel one extra `TRAIL` past the final cell so the
-        // glow fully exits by the time the effect completes — the last frame is
-        // a cleanly-settled ring with no lingering hotspot.
+        // Overshoot by one TRAIL so the glow fully exits before the effect
+        // completes; last frame is a clean settled ring.
         let head = ctx.alpha() * (n as f32 - 1.0 + TRAIL);
         for (i, (x, y)) in ring.into_iter().enumerate() {
             let d = head - i as f32;
@@ -471,10 +443,9 @@ mod tests {
 
     #[test]
     fn shimmer_blooms_out_of_the_settled_splash_colour() {
-        // The whole point of the bloom: at zero amplitude the wave *is* the
-        // colour the power-on fade lands on, so there's no jump when the fade
-        // hands over. If someone retunes the shimmer's centre hue and forgets
-        // this, the seam comes back — so lock it exactly to `theme::SPLASH_DOT`.
+        // At zero amplitude the wave is exactly the fade's endpoint colour.
+        // If someone retunes the shimmer centre and forgets this, the seam
+        // reappears; lock it to `theme::SPLASH_DOT`.
         let (h, s, l) = SHIMMER_CENTER;
         assert_eq!(
             hsl_to_rgb(h, s, l),

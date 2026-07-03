@@ -1,0 +1,17 @@
+trigger:
+  - event: ["push", "pull_request"]
+    branch: ["main"]
+
+engine: microvm
+
+dependencies:
+  nixpkgs:
+    - rustc
+    - cargo
+
+environment:
+  CARGO_TERM_COLOR: always
+
+steps:
+  - name: unit tests
+    command: cargo test --workspace --lib

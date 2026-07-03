@@ -144,10 +144,9 @@ fn draw_content(
     };
 
     let wrap = Wrap { trim: false };
-    // Measure the *wrapped* height at the exact render width so the clamp and the
-    // scrollbar reflect what's actually drawn — the content can't be scrolled a
-    // line past its end into empty space, and the thumb never lies. Capped to
-    // `u16::MAX` so a pathological payload truncates rather than wrapping around.
+    // Measure the *wrapped* height at the exact render width so the clamp and
+    // scrollbar match what's drawn. Capped to `u16::MAX` so a pathological
+    // payload truncates rather than wrapping the offset around.
     let content_h = Paragraph::new(text.clone())
         .wrap(wrap)
         .line_count(inner.width.max(1))
@@ -166,10 +165,9 @@ fn draw_content(
     }
 }
 
-/// Draw a vertical scrollbar on the right border of the bordered content box
-/// `area` when the `content_h`-row body overflows the `view_h`-row viewport.
-/// Chromeless when everything fits — the bar only appears when it means
-/// something. The thumb rides the border column, so it costs no content width.
+/// Draw a vertical scrollbar on `area`'s right border when `content_h` exceeds
+/// `view_h`. No-op when content fits. Thumb rides the border column, no content
+/// width consumed.
 fn render_vscrollbar(frame: &mut Frame, area: Rect, content_h: u16, offset: u16, view_h: u16) {
     if content_h <= view_h {
         return;

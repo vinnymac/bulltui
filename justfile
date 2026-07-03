@@ -46,9 +46,13 @@ run *ARGS:
 snapshot:
     BULLTUI_REDIS_URL={{demo_url}} cargo run -q -p bulltui -- --snapshot
 
+# Record the demo GIF (requires vhs: brew install vhs; run `just demo` first).
+record: build
+    vhs demo.tape
+
 # Build an optimized release binary.
 build:
-    cargo build --release -p bulltui
+    cargo build --release --locked -p bulltui
 
 # --- packaging ---------------------------------------------------------------
 

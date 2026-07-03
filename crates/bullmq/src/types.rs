@@ -1,4 +1,4 @@
-//! Domain types mirroring BullMQ's data model and bull-board's `AppJob`/`AppQueue`.
+//! Domain types for BullMQ jobs, queues, metrics, and events.
 
 use std::collections::HashMap;
 
@@ -112,7 +112,7 @@ impl JobState {
     }
 }
 
-/// Job counts per state — bull-board's `JobCounts` / `AppQueue.counts`.
+/// Job counts per state.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobCounts {
     pub active: i64,
@@ -159,8 +159,7 @@ impl JobCounts {
     }
 }
 
-/// A fully-decoded BullMQ job, mirroring the fields bull-board's `formatJob`
-/// exposes (plus a few extras useful in a TUI).
+/// A fully-decoded BullMQ job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,
@@ -317,7 +316,7 @@ impl DelayedKind {
 pub struct JobScheduler {
     pub id: String,
     pub name: Option<String>,
-    /// Next-run epoch ms — the `repeat` ZSET score (authoritative).
+    /// Next-run epoch ms; the `repeat` ZSET score (authoritative).
     pub next_run_ms: Option<i64>,
     pub pattern: Option<String>,
     pub every: Option<u64>,
@@ -630,7 +629,7 @@ pub struct RateLimitStatus {
     pub duration_ms: Option<i64>,
     pub concurrency: Option<i64>,
     pub active: i64,
-    /// `queue.rateLimit(ms)` sets the counter to MAX_SAFE_INTEGER — a manual block.
+    /// `queue.rateLimit(ms)` sets the counter to MAX_SAFE_INTEGER (manual block).
     pub manual: bool,
 }
 

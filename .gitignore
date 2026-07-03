@@ -12,3 +12,10 @@ bulltui.log
 
 # os
 .DS_Store
+
+# npm packaging output (cargo-npm)
+/npm/
+/dist/
+
+# planning docs
+docs/

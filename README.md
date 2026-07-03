@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/bulltui.svg)](https://www.npmjs.com/package/bulltui)
 [![crates.io](https://img.shields.io/crates/v/bulltui.svg)](https://crates.io/crates/bulltui)
 [![Downloads](https://img.shields.io/npm/dm/bulltui.svg)](https://www.npmjs.com/package/bulltui)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A fast, keyboard-driven terminal UI for [BullMQ](https://docs.bullmq.io/) — with
 feature parity with [bull-board](https://github.com/felixmosh/bull-board), in
@@ -127,4 +127,4 @@ direct-to-Redis BullMQ client (reads + admin writes) — and
 
 ## License
 
-MIT
+Apache-2.0

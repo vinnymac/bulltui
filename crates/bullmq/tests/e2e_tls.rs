@@ -1,6 +1,6 @@
-//! End-to-end TLS tests. Proves `rediss://` actually rides TLS at runtime —
-//! not just that the URL parses — by running real BullMQ commands over a
-//! TLS-only broker, and that certificate verification is on by default.
+//! End-to-end TLS tests. Proves `rediss://` actually rides TLS at runtime,
+//! not just that the URL parses, by running real BullMQ commands over a
+//! TLS-only broker; verifies certificate verification is on by default.
 
 mod common;
 
@@ -12,7 +12,7 @@ use serde_json::json;
 use tokio::time::timeout;
 
 /// With verification off, a `rediss://` connection completes the TLS handshake
-/// and carries real reads *and* writes — the whole point of TLS support.
+/// and carries real reads *and* writes; this is the core TLS correctness check.
 #[tokio::test]
 async fn rediss_carries_commands_over_tls() {
     let redis = start_redis_tls().await;

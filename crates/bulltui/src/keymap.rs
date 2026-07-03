@@ -6,8 +6,8 @@
 
 use crate::app::Screen;
 
-/// A logical grouping of bindings — a help-section header, and the scope a
-/// binding applies to.
+/// A logical grouping of bindings; used as the help-section header and the
+/// scope a binding applies to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     Global,
@@ -763,7 +763,7 @@ mod tests {
         let surfaces = |screen: Screen, binding: &str| {
             status_hints(screen).iter().any(|h| h.binding == binding)
         };
-        // Events: the event's job is openable — say so.
+        // Events: the event's job is openable; verify the hint surfaces.
         assert!(
             surfaces(Screen::Events, "Enter / →"),
             "Events status line must advertise opening the event's job"

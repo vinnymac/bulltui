@@ -1,9 +1,8 @@
-//! A tiny, dependency-free fuzzy matcher and filter expression.
+//! Dependency-free fuzzy matcher and filter expression.
 //!
-//! The corpus is always small (a page of jobs, a handful of queues/commands),
-//! so a ~50-line subsequence scorer beats pulling in a matcher crate with its
-//! own threading/config model — and it stays deterministic, which the render
-//! path requires.
+//! Corpus is always small (a page of jobs, a handful of queues/commands), so
+//! an inline subsequence scorer is sufficient. Deterministic; safe for the
+//! render path.
 
 /// Case-insensitive subsequence score of `needle` against `haystack`.
 ///
@@ -53,9 +52,9 @@ pub fn is_match(needle: &str, haystack: &str) -> bool {
     score(needle, haystack).is_some()
 }
 
-/// A `/`-filter expression: whitespace-separated terms, all of which must hold
-/// (logical AND). A term prefixed with `!` is *negated* — the (case-insensitive)
-/// substring must NOT appear. Positive terms use fuzzy subsequence matching.
+/// A `/`-filter expression: whitespace-separated terms (logical AND).
+/// A `!`-prefixed term negates (case-insensitive substring exclusion).
+/// Positive terms use fuzzy subsequence matching.
 #[derive(Debug, Clone, Default)]
 pub struct Filter {
     positive: Vec<String>,

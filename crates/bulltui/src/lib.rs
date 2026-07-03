@@ -1,4 +1,4 @@
-//! bulltui — a terminal UI for BullMQ with feature parity with bull-board.
+//! bulltui: a terminal UI for BullMQ with feature parity with bull-board.
 //!
 //! The binary is a thin wrapper around this library so the application state
 //! ([`app::App`]) and rendering ([`ui`]) can be driven directly from tests with

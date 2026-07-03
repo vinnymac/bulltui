@@ -11,21 +11,18 @@ pub const BORDER_FOCUS: Color = Color::Cyan;
 pub const WARN: Color = Color::Yellow;
 pub const DANGER: Color = Color::Red;
 
-/// Sentinel color for the live connection indicator. Deliberately a unique RGB
-/// green (not `Color::Green`) so the pulsing heartbeat effect can target *only*
-/// the indicator via `CellFilter::FgColor` without also catching other green UI
-/// such as completed counts. [`LIVE_DIM`] is the trough of the breath.
+/// Sentinel color for the live connection indicator. A unique RGB value so
+/// `CellFilter::FgColor` targets only this cell without matching other greens
+/// (e.g. completed counts). [`LIVE_DIM`] is the pulse's dim endpoint.
 pub const LIVE: Color = Color::Rgb(0x53, 0xE0, 0x6A);
 pub const LIVE_DIM: Color = Color::Rgb(0x1C, 0x4A, 0x27);
 
-/// The "connecting" amber for the boot LED — shown while the connection is being
-/// established, before it settles to the live green (or, on failure, red). A
-/// distinct warm tone so the handshake reads as *in progress*, not stalled.
+/// Amber for the boot LED while the connection is being established.
+/// Distinct from the live green and error red.
 pub const CONNECTING: Color = Color::Rgb(0xE0, 0xA5, 0x30);
 
-/// The boot splash's `BULLTUI` dot-matrix: a lit dot and its warming-up glow.
-/// The reveal fades *between these two* (never from black), so it reads as an
-/// LED sign powering on rather than emerging from a harsh void.
+/// Boot splash dot colours: fully lit and dim. The reveal fades between these
+/// two (never from black), so dots appear to warm up rather than flash in.
 pub const SPLASH_DOT: Color = Color::Rgb(0x4F, 0xD6, 0xE6);
 pub const SPLASH_DOT_DIM: Color = Color::Rgb(0x16, 0x3E, 0x47);
 
@@ -54,14 +51,12 @@ pub fn key_hint() -> Style {
     Style::default().fg(ACCENT)
 }
 
-/// The moving thumb of a scrollbar — the accent so it reads as the interactive
-/// element against the muted border track.
+/// Accent color for the scrollbar thumb; contrasts with the muted track.
 pub fn scrollbar_thumb() -> Style {
     Style::default().fg(ACCENT)
 }
 
-/// The static track a scrollbar thumb rides in — the border tone, so it settles
-/// into the frame rather than competing with the content.
+/// Border-tone color for the scrollbar track; recedes behind the accent thumb.
 pub fn scrollbar_track() -> Style {
     Style::default().fg(BORDER)
 }
@@ -75,11 +70,8 @@ pub fn danger() -> Style {
     Style::default().fg(DANGER).add_modifier(Modifier::BOLD)
 }
 
-/// A distinctive colour per job state, used for badges, counts, and bar fills.
-///
-/// These are bull-board's **dark-mode** status colours (the `.dark` overrides
-/// in `@bull-board/ui`'s `index.css`) — muted tones tuned for a dark canvas,
-/// far friendlier than the neon ANSI defaults they replaced.
+/// Per-state color for badges, counts, and bar fills. Matches bull-board's
+/// dark-mode palette; muted RGB values chosen for dark terminal backgrounds.
 pub fn state_color(state: JobState) -> Color {
     match state {
         JobState::Active => Color::Rgb(0x5B, 0x8A, 0xD7),
@@ -113,9 +105,8 @@ pub fn event_color(kind: EventKind) -> Color {
     }
 }
 
-/// Near-black / near-white inks for text drawn *on top of* a coloured fill.
-/// `INK_DARK` echoes bull-board's dark canvas so dark-on-colour reads as the
-/// background punched through.
+/// Near-black and near-white inks for text on colored fills. Used by
+/// [`contrast_text`] to pick whichever yields the higher WCAG contrast ratio.
 const INK_DARK: Color = Color::Rgb(0x18, 0x1D, 0x25);
 const INK_LIGHT: Color = Color::Rgb(0xEC, 0xEF, 0xF3);
 

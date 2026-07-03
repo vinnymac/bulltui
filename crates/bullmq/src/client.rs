@@ -1,9 +1,7 @@
 //! The BullMQ Redis client: connection management and read operations.
 //!
-//! All semantics here are derived from the bullmq source (v5.79) — see the
-//! Lua command scripts under `bullmq/dist/cjs/commands` and the `queue-getters`
-//! / `job` classes. Reads never mutate Redis (unlike bullmq's own `getCounts`,
-//! which RPOPs a stale marker — we instead account for the marker in-place).
+//! Semantics match BullMQ v5. Reads never mutate Redis; the `getCounts` RPOP
+//! side effect is skipped by accounting for the stale marker in-place.
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
@@ -101,8 +99,8 @@ impl BullClient {
     // -- job schedulers -----------------------------------------------------
 
     /// List a queue's job schedulers (cron / repeatable), soonest-first.
-    /// Mirrors `getJobSchedulers`: read the `repeat` ZSET with scores, then
-    /// fetch each scheduler's metadata hash. The score is the next-run epoch ms.
+    /// Reads the `repeat` ZSET with scores, then fetches each scheduler's hash.
+    /// The score is the next-run epoch ms.
     pub async fn list_job_schedulers(
         &self,
         queue: &str,
@@ -280,8 +278,7 @@ impl BullClient {
 
     // -- counts / status ----------------------------------------------------
 
-    /// Job counts per state, replicating `getCounts-1.lua` (marker-aware,
-    /// without the RPOP side effect).
+    /// Job counts per state. Marker-aware; skips the RPOP side effect.
     pub async fn job_counts(&self, queue: &str) -> Result<JobCounts> {
         let kb = self.keys(queue);
         let mut conn = self.conn();
@@ -464,8 +461,8 @@ impl BullClient {
         Ok(jobs)
     }
 
-    /// The underlying states a bull-board *status* expands to. Mirrors
-    /// bullmq's `sanitizeJobTypes`: requesting `waiting` also pulls `paused`.
+    /// The underlying states a bull-board *status* expands to.
+    /// Requesting `waiting` also pulls `paused`.
     pub fn status_states(status: JobState) -> Vec<JobState> {
         if status == JobState::Waiting {
             vec![JobState::Waiting, JobState::Paused]
@@ -511,9 +508,8 @@ impl BullClient {
         Ok(out)
     }
 
-    /// Get the "latest" jobs across the given states, concatenating each
-    /// state's `[start, end]` range in order — mirrors bull-board's behaviour
-    /// for the `latest` tab (`getJobs(allStatuses, start, end)`).
+    /// Get jobs across the given states, concatenating each state's
+    /// `[start, end]` range in order (bull-board `latest` tab behaviour).
     pub async fn get_jobs_latest(
         &self,
         queue: &str,
@@ -572,8 +568,7 @@ impl BullClient {
         Ok(JobLogs { logs, count })
     }
 
-    /// Fetch historical metrics (`metrics:<kind>` + `:data`), mirroring
-    /// `getMetrics-2.lua` / `Queue.getMetrics`.
+    /// Fetch historical metrics from the `metrics:<kind>` hash and `:data` list.
     pub async fn metrics(
         &self,
         queue: &str,
@@ -744,14 +739,10 @@ impl BullClient {
 
 /// Retry/timeout policy for the shared [`ConnectionManager`].
 ///
-/// The manager's defaults are tuned for a long-lived server: 6 retries with an
-/// exponential backoff whose *second* delay is ~100s (backon `factor = 100`,
-/// `min_delay = 1s`). For an interactive TUI that would turn any persistent
-/// failure — an untrusted TLS cert, a wrong host, a broker that's down — into a
-/// multi-minute hang at startup instead of a clear error. So we bound it: a
-/// per-attempt connect timeout and a short, capped backoff, so a bad connection
-/// surfaces its real error within seconds. Auto-refresh re-attempts on the next
-/// poll, so a brief blip still recovers.
+/// The manager's defaults back off to ~100s on the second retry; that would
+/// hang a TUI for minutes on any persistent error (bad cert, wrong host, down
+/// broker). Capped to a short backoff so failures surface within seconds.
+/// Auto-refresh re-attempts on each poll tick, so transient blips still recover.
 fn connection_manager_config() -> ConnectionManagerConfig {
     ConnectionManagerConfig::new()
         .set_connection_timeout(Duration::from_secs(8))
@@ -761,10 +752,8 @@ fn connection_manager_config() -> ConnectionManagerConfig {
 
 /// Parse `url` into a [`ConnectionInfo`], applying [`ConnectOptions`].
 ///
-/// TLS is chosen by the scheme (redis-rs maps `rediss://` to a `TcpTls`
-/// address). `insecure` flips off certificate verification, but only for a TLS
-/// address — pairing `--insecure` with a plaintext `redis://` URL is a hard
-/// error (a silent no-op there would be a security foot-gun).
+/// TLS is chosen by scheme (`rediss://` maps to `TcpTls`). `insecure` disables
+/// cert verification, but only for TLS; pairing it with `redis://` is an error.
 fn connection_info(url: &str, opts: &ConnectOptions) -> Result<ConnectionInfo> {
     let mut info = url.into_connection_info()?;
     if opts.insecure {
