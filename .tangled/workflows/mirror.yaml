@@ -1,0 +1,20 @@
+# Mirrors every push to GitHub so GitHub Actions can run CI and releases.
+# Secret: GITHUB_MIRROR_TOKEN — a fine-grained GitHub PAT scoped to the
+# vinnymac/bulltui repo with "Contents: Read and write" permission only.
+trigger:
+  - event: ["push"]
+
+engine: microvm
+
+dependencies:
+  nixpkgs:
+    - git
+    - openssh
+
+steps:
+  - name: mirror to github
+    command: |
+      git remote add github "https://x-access-token:${GITHUB_MIRROR_TOKEN}@github.com/vinnymac/bulltui.git"
+      git push github --mirror
+    env:
+      GITHUB_MIRROR_TOKEN: ${{ secrets.GITHUB_MIRROR_TOKEN }}

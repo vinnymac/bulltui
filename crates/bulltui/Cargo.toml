@@ -40,24 +40,3 @@ arboard = { version = "3", default-features = false }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
 testcontainers = "0.23"
-
-# --- npm distribution (cargo-npm) -------------------------------------------
-# Ship the `bulltui` binary to npm so JS / BullMQ devs can `npx bulltui`.
-#   cargo install --locked cargo-npm
-#   cargo npm generate --clean   # collects per-target binaries from target/
-#   cargo npm publish            # main pkg + per-platform binary pkgs
-# Building every target at once is easiest with cargo-zigbuild or a CI matrix.
-[package.metadata.npm]
-name = "bulltui"
-bins = ["bulltui"]
-# Platform packages are unscoped (bulltui-linux-x64, bulltui-darwin-arm64, …).
-# Set `prefix = "@vinnymac/bulltui-"` to publish them under an npm scope instead.
-targets = [
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-unknown-linux-musl",
-    "aarch64-unknown-linux-musl",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-pc-windows-msvc",
-]

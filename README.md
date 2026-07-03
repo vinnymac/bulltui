@@ -1,7 +1,6 @@
 # bulltui
 
 [![npm](https://img.shields.io/npm/v/bulltui.svg)](https://www.npmjs.com/package/bulltui)
-[![crates.io](https://img.shields.io/crates/v/bulltui.svg)](https://crates.io/crates/bulltui)
 [![Downloads](https://img.shields.io/npm/dm/bulltui.svg)](https://www.npmjs.com/package/bulltui)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -16,14 +15,11 @@ Redis/Valkey **directly**, so there's no Node.js runtime to stand up.
 ## Install
 
 ```sh
-# JS / BullMQ devs — run it straight from npm, no install
+# run it straight from npm, no install needed
 npx bulltui
 
-# or install it globally
+# or install globally
 npm install -g bulltui
-
-# Rust devs
-cargo install bulltui
 
 # Docker — see "Containers" below
 docker run --rm -it vinnymac/bulltui --url redis://my-redis:6379

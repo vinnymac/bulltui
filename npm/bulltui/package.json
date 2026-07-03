@@ -1,0 +1,33 @@
+{
+  "name": "bulltui",
+  "version": "0.1.0",
+  "description": "A fast, keyboard-driven terminal UI for BullMQ",
+  "homepage": "https://tangled.sh/@vinnymac.dev/bulltui",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vinnymac/bulltui.git"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "bullmq",
+    "redis",
+    "queue",
+    "tui",
+    "cli"
+  ],
+  "bin": {
+    "bulltui": "run.js"
+  },
+  "files": [
+    "run.js"
+  ],
+  "optionalDependencies": {
+    "bulltui-darwin-arm64": "*",
+    "bulltui-darwin-x64": "*",
+    "bulltui-linux-x64": "*",
+    "bulltui-linux-arm64": "*"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

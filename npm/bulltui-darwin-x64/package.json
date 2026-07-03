@@ -1,0 +1,12 @@
+{
+  "name": "bulltui-darwin-x64",
+  "version": "0.1.0",
+  "description": "macOS x64 binary for bulltui",
+  "license": "Apache-2.0",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bulltui"],
+  "bin": {
+    "bulltui": "bulltui"
+  }
+}
