@@ -1,8 +1,8 @@
 name: Release
 
-# Triggered by a v* tag (pushed by the auto-tag job in version.yml after a
-# changesets version PR is merged). Builds all platform binaries in parallel,
-# then publishes the per-platform npm packages, root package, and Docker image.
+# Triggered by a v* tag cut on the knot with `just release` (after the version
+# PR merges) and mirrored here. Builds all platform binaries in parallel, then
+# publishes the per-platform npm packages, root package, and Docker image.
 
 on:
   push:
