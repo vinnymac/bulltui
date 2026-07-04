@@ -1,6 +1,6 @@
 {
   "name": "bulltui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A fast, keyboard-driven terminal UI for BullMQ",
   "homepage": "https://tangled.sh/@vinnymac.dev/bulltui",
   "repository": {
