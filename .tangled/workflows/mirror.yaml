@@ -1,21 +1,5 @@
-# Mirrors every push to GitHub so GitHub Actions can run CI and releases.
-# Secret: GITHUB_MIRROR_TOKEN — a fine-grained GitHub PAT scoped to the
-# vinnymac/bulltui repo with "Contents: Read and write" permission only.
-# Tangled injects repo-settings secrets straight into the step env, so it's
-# used as $GITHUB_MIRROR_TOKEN below. Do NOT map it via `environment:` with
-# `${{ secrets.* }}` — Tangled doesn't interpolate that GitHub-Actions syntax;
-# it becomes a literal string and curl rejects the URL as malformed.
-#
-# Two non-obvious CI facts this depends on:
-#   * The microVM checks out the triggering commit as a DETACHED HEAD with no
-#     local branch refs, so `git push --mirror` finds nothing to push and exits
-#     0 — a silent no-op. Instead we push HEAD to its exact triggering ref
-#     ($TANGLED_REF, e.g. refs/heads/main or refs/tags/v1), which mirrors both
-#     branch and tag pushes and fails loudly if the ref is ever missing.
-#   * The clone is shallow (depth=1) and `clone.depth: 0` does NOT unshallow it,
-#     so a push rejects with "did not receive expected object <parent>" /
-#     index-pack failed (the pack references history the shallow clone lacks).
-#     We unshallow from origin (the knot has full history) before pushing.
+# Mirrors every branch/tag push to GitHub so its Actions run CI and releases.
+# GITHUB_MIRROR_TOKEN is a repo secret Tangled injects into the step env.
 when:
   - event: ["push"]
     branch: ["**"]
@@ -31,6 +15,8 @@ dependencies:
 steps:
   - name: mirror to github
     command: |
+      # CI checks out a shallow, detached HEAD, so unshallow for full history
+      # and push HEAD to its exact triggering ref rather than `--mirror`.
       if git rev-parse --is-shallow-repository | grep -qx true; then
         git fetch --unshallow
       fi
