@@ -73,11 +73,17 @@ jobs:
             cp artifacts/$pkg/bulltui npm/$pkg/bulltui
             chmod +x npm/$pkg/bulltui
           done
-      - name: Set versions from tag
+      - name: Set versions and repository from tag
+        # CI is the source of truth for both `version` and `repository`. npm
+        # provenance (auto-enabled by `id-token: write`) rejects any package
+        # whose `repository.url` doesn't match this repo — so we stamp it here
+        # rather than trust the checked-in files. That way a `cargo npm generate`
+        # regen (or a hand edit) that drops the field can't break a release.
         run: |
           node -e "
             const fs = require('fs');
             const version = process.env.VERSION.replace(/^v/, '');
+            const url = 'git+https://github.com/vinnymac/bulltui.git';
             const pkgs = [
               'bulltui',
               'bulltui-darwin-arm64', 'bulltui-darwin-x64',
@@ -87,6 +93,8 @@ jobs:
               const path = \`npm/\${p}/package.json\`;
               const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
               pkg.version = version;
+              pkg.repository = { type: 'git', url };
+              if (p !== 'bulltui') pkg.repository.directory = \`npm/\${p}\`;
               if (pkg.optionalDependencies) {
                 Object.keys(pkg.optionalDependencies).forEach(k => {
                   pkg.optionalDependencies[k] = version;
@@ -94,7 +102,7 @@ jobs:
               }
               fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
             });
-            console.log('Set all package versions to', version);
+            console.log('Set all package versions to', version, 'and repository to', url);
           "
         env:
           VERSION: ${{ github.ref_name }}
@@ -107,10 +115,30 @@ jobs:
           done
       - name: Publish root package
         run: npm publish ./npm/bulltui --access public
+      - name: Package release binaries
+        # Archive each binary under its Rust target triple (the cargo-binstall /
+        # rustup convention) so the Release page carries ready-to-run builds, not
+        # just the source zip. A SHA256SUMS lets people verify what they grabbed.
+        run: |
+          declare -A targets=(
+            [bulltui-darwin-arm64]=aarch64-apple-darwin
+            [bulltui-darwin-x64]=x86_64-apple-darwin
+            [bulltui-linux-x64]=x86_64-unknown-linux-gnu
+            [bulltui-linux-arm64]=aarch64-unknown-linux-gnu
+          )
+          mkdir -p release-assets
+          for pkg in "${!targets[@]}"; do
+            target="${targets[$pkg]}"
+            install -m 0755 "artifacts/$pkg/bulltui" bulltui
+            tar -czf "release-assets/bulltui-${target}.tar.gz" bulltui
+            rm bulltui
+          done
+          ( cd release-assets && sha256sum *.tar.gz > SHA256SUMS )
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          files: release-assets/*
 
   docker:
     name: Build Docker image (${{ matrix.arch }})
