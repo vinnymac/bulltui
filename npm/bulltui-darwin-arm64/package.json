@@ -1,0 +1,17 @@
+{
+  "name": "bulltui-darwin-arm64",
+  "version": "0.1.0",
+  "description": "macOS ARM64 binary for bulltui",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vinnymac/bulltui.git",
+    "directory": "npm/bulltui-darwin-arm64"
+  },
+  "license": "Apache-2.0",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bulltui"],
+  "bin": {
+    "bulltui": "bulltui"
+  }
+}

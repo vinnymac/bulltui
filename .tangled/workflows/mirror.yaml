@@ -1,0 +1,24 @@
+# Mirrors every branch push to GitHub so its Actions run CI on the same commits.
+# Release tags are pushed to GitHub directly by `just release` (not mirrored
+# here), so the mirror only keeps branches in sync — that direct tag push is
+# what fires release.yml. GITHUB_MIRROR_TOKEN is a repo secret Tangled injects.
+when:
+  - event: ["push"]
+    branch: ["**"]
+
+engine: microvm
+
+dependencies:
+  - git
+  - openssh
+
+steps:
+  - name: mirror to github
+    command: |
+      # CI checks out a shallow, detached HEAD, so unshallow for full history
+      # and push HEAD to its exact triggering ref rather than `--mirror`.
+      if git rev-parse --is-shallow-repository | grep -qx true; then
+        git fetch --unshallow
+      fi
+      git remote add github "https://x-access-token:${GITHUB_MIRROR_TOKEN}@github.com/vinnymac/bulltui.git"
+      git push github --force "HEAD:${TANGLED_REF}"

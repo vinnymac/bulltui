@@ -73,3 +73,45 @@ npm-pack:
 # Publish the generated npm packages (needs `npm login` or NODE_AUTH_TOKEN).
 npm-publish:
     cargo npm publish
+
+# --- release -----------------------------------------------------------------
+# The knot is the source of truth; GitHub is a one-way mirror that only runs the
+# tag-triggered publish (.github/workflows/release.yml). So versioning happens
+# here and the review PR opens on Tangled — not on the mirror.
+
+# Record a change for the next release (choose the bump, write a summary).
+changeset:
+    pnpm changeset
+
+# Open a version-bump PR on Tangled: consume changesets onto a branch (bumping
+# the version + changelog) and push it, so Tangled raises the PR for review.
+version-pr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git switch -C release/version-packages main
+    pnpm install --frozen-lockfile
+    pnpm run version
+    git add -A
+    if git diff --cached --quiet; then
+        echo "No changesets to version — add one with 'just changeset' first." >&2
+        exit 1
+    fi
+    git commit -m "chore: version packages"
+    git push -f -u origin release/version-packages
+    echo "Pushed release/version-packages — open its PR into main on Tangled to review + merge."
+
+# After the version PR merges: tag main and push the tag so release.yml builds
+# and publishes. The knot is the source of truth, but its GitHub mirror only
+# forwards branches (see .tangled/workflows/mirror.yaml) — so we push the tag
+# straight to GitHub too, and that direct push is what deterministically fires
+# the release. Run from an up-to-date main; needs the `gh` CLI authenticated.
+release:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git switch main
+    git pull --ff-only
+    version="v$(node -p "require('./npm/bulltui/package.json').version")"
+    git tag "$version"
+    git push origin "$version"
+    git push "https://$(gh auth token)@github.com/vinnymac/bulltui.git" "$version"
+    echo "Pushed $version to the knot and GitHub — release.yml is now building."

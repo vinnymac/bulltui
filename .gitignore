@@ -13,9 +13,14 @@ bulltui.log
 # os
 .DS_Store
 
-# npm packaging output (cargo-npm)
-/npm/
+# built binaries staged into npm packages (never committed — CI populates them)
+npm/*/bulltui
+npm/*/bulltui.exe
 /dist/
+
+# npm leftovers (workspace uses pnpm)
+package-lock.json
+.npmrc
 
 # planning docs
 docs/

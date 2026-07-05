@@ -1,0 +1,12 @@
+{
+  "name": "bulltui-workspace",
+  "private": true,
+  "scripts": {
+    "changeset": "changeset",
+    "version": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0"
+  },
+  "packageManager": "pnpm@10.12.1"
+}

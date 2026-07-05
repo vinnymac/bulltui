@@ -1,0 +1,17 @@
+{
+  "name": "bulltui-linux-x64",
+  "version": "0.1.0",
+  "description": "Linux x64 binary for bulltui",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vinnymac/bulltui.git",
+    "directory": "npm/bulltui-linux-x64"
+  },
+  "license": "Apache-2.0",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bulltui"],
+  "bin": {
+    "bulltui": "bulltui"
+  }
+}
