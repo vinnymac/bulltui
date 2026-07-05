@@ -1,7 +1,8 @@
 # bulltui
 
-[![npm](https://img.shields.io/npm/v/bulltui.svg)](https://www.npmjs.com/package/bulltui)
-[![Downloads](https://img.shields.io/npm/dm/bulltui.svg)](https://www.npmjs.com/package/bulltui)
+[![npm](https://img.shields.io/npm/v/bulltui.svg)](https://npmx.dev/package/bulltui)
+[![Downloads](https://img.shields.io/npm/dm/bulltui.svg)](https://npmx.dev/package/bulltui)
+[![GHCR](https://ghcr-badge.egpl.dev/vinnymac/bulltui/latest_tag?trim=patch&label=ghcr)](https://github.com/vinnymac/bulltui/pkgs/container/bulltui)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 A fast, keyboard-driven terminal UI for [BullMQ](https://docs.bullmq.io/). Written in Rust with [ratatui](https://ratatui.rs), it connects to Redis/Valkey directly.
