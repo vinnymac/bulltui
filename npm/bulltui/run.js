@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-'use strict';
+import { spawnSync } from 'child_process';
+import { createRequire } from 'module';
 
-const { spawnSync } = require('child_process');
-const { join } = require('path');
+const require = createRequire(import.meta.url);
 
 const PLATFORMS = {
   'darwin-arm64': 'bulltui-darwin-arm64',
